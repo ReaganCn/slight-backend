@@ -1,0 +1,29 @@
+# Database
+sqlalchemy==2.0.23
+asyncpg==0.29.0
+psycopg2-binary==2.9.9
+
+# Web scraping (flexible implementation)
+beautifulsoup4==4.12.2     # HTML parsing (required for all scrapers)
+aiohttp==3.9.1             # HTTP client for ScrapingBee API
+requests==2.31.0           # Basic HTTP requests
+
+# Playwright - FREE browser automation with JavaScript support
+playwright==1.40.0         # Recommended free alternative to ScrapingBee
+
+# AI/ML
+langchain==0.0.350
+openai==1.3.7
+
+# Utility
+python-dotenv==1.0.0
+pydantic==2.5.2
+python-dateutil==2.8.2
+
+# AWS
+boto3==1.34.0
+botocore==1.34.0
+
+# Testing (optional for Lambda but useful for local development)
+pytest==7.4.3
+pytest-asyncio==0.21.1 

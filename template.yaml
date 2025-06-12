@@ -1,0 +1,309 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Competitor Tracking SaaS Backend
+  
+  Serverless application with RDS PostgreSQL for competitor tracking and battle card generation
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+  DBUsername:
+    Type: String
+    Default: postgres
+    NoEcho: true
+  DBPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+  OpenAIApiKey:
+    Type: String
+    NoEcho: true
+  ScrapingBeeApiKey:
+    Type: String
+    NoEcho: true
+
+Globals:
+  Function:
+    Timeout: 60               # Increased for Playwright
+    MemorySize: 1024          # Increased for browser automation
+    Runtime: python3.10
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        DATABASE_URL: !Sub 
+          - "postgresql+asyncpg://${DBUsername}:${DBPassword}@${DBEndpoint}:5432/competitordb"
+          - DBEndpoint: !GetAtt CompetitorDB.Endpoint.Address
+        OPENAI_API_KEY: !Ref OpenAIApiKey
+        SCRAPINGBEE_API_KEY: !Ref ScrapingBeeApiKey
+        # Flexible scraper configuration
+        PREFERRED_SCRAPER: "auto"  # Auto-detect best available scraper
+
+Resources:
+  # VPC for RDS
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-vpc"
+
+  # Public Subnets for Lambda
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-public-subnet-1"
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-public-subnet-2"
+
+  # Private Subnets for RDS
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.3.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-private-subnet-1"
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.4.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-private-subnet-2"
+
+  # Internet Gateway
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-igw"
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Route Table
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-public-rt"
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  # Security Groups
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Lambda functions
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for RDS PostgreSQL
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref LambdaSecurityGroup
+
+  # RDS Subnet Group
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for RDS
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-db-subnet-group"
+
+  # RDS PostgreSQL Instance
+  CompetitorDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub "${AWS::StackName}-postgres"
+      Engine: postgres
+      EngineVersion: '15.4'
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: 20
+      StorageType: gp2
+      DBName: competitordb
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      BackupRetentionPeriod: 7
+      MultiAZ: false
+      PubliclyAccessible: false
+      StorageEncrypted: true
+      DeletionProtection: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-postgres"
+
+  # Lambda Functions
+  ScrapeCompetitorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers.scrape_competitor.handler
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PublicSubnet1
+          - !Ref PublicSubnet2
+      Events:
+        ScheduledScrape:
+          Type: Schedule
+          Properties:
+            Schedule: rate(6 hours)
+            Input: '{"action": "scheduled_scrape"}'
+        ApiScrape:
+          Type: Api
+          Properties:
+            Path: /scrape
+            Method: post
+
+  GenerateBattleCardFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers.battle_card.handler
+      Timeout: 60
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PublicSubnet1
+          - !Ref PublicSubnet2
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /battle-card
+            Method: post
+
+  CompetitorManagementFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers.competitor_management.handler
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PublicSubnet1
+          - !Ref PublicSubnet2
+      Events:
+        CreateCompetitor:
+          Type: Api
+          Properties:
+            Path: /competitors
+            Method: post
+        GetCompetitors:
+          Type: Api
+          Properties:
+            Path: /competitors
+            Method: get
+        GetCompetitor:
+          Type: Api
+          Properties:
+            Path: /competitors/{competitor_id}
+            Method: get
+        UpdateCompetitor:
+          Type: Api
+          Properties:
+            Path: /competitors/{competitor_id}
+            Method: put
+        DeleteCompetitor:
+          Type: Api
+          Properties:
+            Path: /competitors/{competitor_id}
+            Method: delete
+
+  DatabaseMigrationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers.migrations.handler
+      Timeout: 300
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref PublicSubnet1
+          - !Ref PublicSubnet2
+
+Outputs:
+  ApiGatewayEndpoint:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+  
+  DatabaseEndpoint:
+    Description: "RDS PostgreSQL endpoint"
+    Value: !GetAtt CompetitorDB.Endpoint.Address
+    
+  DatabasePort:
+    Description: "RDS PostgreSQL port"
+    Value: !GetAtt CompetitorDB.Endpoint.Port 
