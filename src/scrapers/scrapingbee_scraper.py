@@ -137,7 +137,7 @@ class ScrapingBeeScraper(BaseScraper):
                 html_content = await response.text()
                 response_time = (datetime.now() - start_time).total_seconds()
                 
-                # Get additional metadata from headers
+                # Get additional metadata_ from headers
                 spb_cost = response.headers.get('spb-cost', '0')
                 spb_country = response.headers.get('spb-country', 'unknown')
                 spb_proxy_type = response.headers.get('spb-proxy-type', 'unknown')
@@ -148,8 +148,8 @@ class ScrapingBeeScraper(BaseScraper):
                 # Extract pricing and features
                 extracted_data = await self._extract_data(soup, competitor_name, url)
                 
-                # Add metadata
-                extracted_data['metadata'] = {
+                # Add metadata_
+                extracted_data['metadata_'] = {
                     'scrape_method': 'scrapingbee',
                     'page_title': soup.title.string if soup.title else '',
                     'response_time': response_time,

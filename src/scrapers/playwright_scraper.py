@@ -166,8 +166,8 @@ class PlaywrightScraper(BaseScraper):
             # Extract pricing and features
             extracted_data = await self._extract_data(soup, competitor_name, url)
             
-            # Add metadata
-            extracted_data['metadata'] = {
+            # Add metadata_
+            extracted_data['metadata_'] = {
                 'scrape_method': 'playwright',
                 'page_title': page_title,
                 'response_time': response_time,

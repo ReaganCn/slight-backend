@@ -95,9 +95,9 @@ class CompetitorScraper:
             result = await self.scraper.scrape_url(url, competitor_name)
             
             # Add some additional context to the result
-            if 'metadata' in result:
-                result['metadata']['competitor_name'] = competitor_name
-                result['metadata']['scraper_info'] = {
+            if 'metadata_' in result:
+                result['metadata_']['competitor_name'] = competitor_name
+                result['metadata_']['scraper_info'] = {
                     'name': self.scraper_info['name'],
                     'type': self.scraper_info['type'],
                     'cost': self.scraper_info['cost']
@@ -154,7 +154,7 @@ async def scrape_single_competitor(competitor_id: str) -> Dict[str, Any]:
                 competitor_id=competitor.id,
                 prices=scraped_data.get('prices', {}),
                 features=scraped_data.get('features', {}),
-                metadata=scraped_data.get('metadata', {}),
+                metadata_=scraped_data.get('metadata_', {}),
                 raw_html_snippet=scraped_data.get('raw_html_snippet', ''),
                 scrape_status="success",
                 scraped_at=datetime.now(timezone.utc)
@@ -197,7 +197,7 @@ async def scrape_single_competitor(competitor_id: str) -> Dict[str, Any]:
                 competitor_id=competitor.id,
                 prices={},
                 features={},
-                metadata={'error': str(e)},
+                metadata_={'error': str(e)},
                 scrape_status="failed",
                 error_message=str(e),
                 scraped_at=datetime.now(timezone.utc)

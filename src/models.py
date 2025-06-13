@@ -54,7 +54,7 @@ class ScrapeResult(Base):
     # Scraped data stored as JSONB for flexibility
     prices = Column(JSONB)  # {"basic": 29, "pro": 99, "enterprise": "contact"}
     features = Column(JSONB)  # {"plan_name": ["feature1", "feature2"]}
-    metadata = Column(JSONB)  # {"scrape_method": "scrapingbee", "page_title": "...", "response_time": 1.2}
+    metadata_ = Column(JSONB)  # {"scrape_method": "scrapingbee", "page_title": "...", "response_time": 1.2}
     
     # Raw data for debugging
     raw_html_snippet = Column(Text)  # Store key sections for debugging
@@ -79,7 +79,7 @@ class BattleCard(Base):
     content = Column(Text, nullable=False)  # Markdown formatted content
     competitor_ids = Column(JSONB)  # List of competitor UUIDs used in analysis
     
-    # AI generation metadata
+    # AI generation metadata_
     ai_model_used = Column(String(100), default="gpt-4")
     generation_prompt = Column(Text)
     

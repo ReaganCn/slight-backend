@@ -45,9 +45,9 @@ async def test_playwright_scraper():
             
             print(f"✅ Playwright test successful!")
             print(f"   URL: {url}")
-            print(f"   Method: {result['metadata']['scrape_method']}")
-            print(f"   Response time: {result['metadata']['response_time']:.2f}s")
-            print(f"   Page title: {result['metadata']['page_title']}")
+            print(f"   Method: {result['metadata_']['scrape_method']}")
+            print(f"   Response time: {result['metadata_']['response_time']:.2f}s")
+            print(f"   Page title: {result['metadata_']['page_title']}")
             
     except Exception as e:
         print(f"❌ Playwright test failed: {e}")
@@ -72,10 +72,10 @@ async def test_scrapingbee_scraper():
             
             print(f"✅ ScrapingBee test successful!")
             print(f"   URL: {url}")
-            print(f"   Method: {result['metadata']['scrape_method']}")
-            print(f"   Response time: {result['metadata']['response_time']:.2f}s")
-            print(f"   API cost: {result['metadata']['api_cost']} credits")
-            print(f"   Proxy country: {result['metadata']['proxy_country']}")
+            print(f"   Method: {result['metadata_']['scrape_method']}")
+            print(f"   Response time: {result['metadata_']['response_time']:.2f}s")
+            print(f"   API cost: {result['metadata_']['api_cost']} credits")
+            print(f"   Proxy country: {result['metadata_']['proxy_country']}")
             
     except Exception as e:
         print(f"❌ ScrapingBee test failed: {e}")
@@ -98,7 +98,7 @@ async def test_auto_scraper():
             print(f"✅ Auto-detection test successful!")
             print(f"   Selected: {info['name']} ({info['cost']})")
             print(f"   URL: {url}")
-            print(f"   Response time: {result['metadata']['response_time']:.2f}s")
+            print(f"   Response time: {result['metadata_']['response_time']:.2f}s")
             
     except Exception as e:
         print(f"❌ Auto-detection test failed: {e}")
@@ -155,7 +155,7 @@ async def test_pricing_page():
                 print(f"   Scraper: {info['name']}")
                 print(f"   Prices found: {len(prices.get('raw_prices', []))}")
                 print(f"   Features found: {len(features.get('plans', []))}")
-                print(f"   Response time: {result['metadata']['response_time']:.2f}s")
+                print(f"   Response time: {result['metadata_']['response_time']:.2f}s")
                 
         except Exception as e:
             print(f"❌ {name}: Failed - {e}")
@@ -185,11 +185,11 @@ async def demonstrate_switching():
                 result = await scraper.scrape_url(url, "Comparison Test")
                 
                 print(f"{description}:")
-                print(f"   Response time: {result['metadata']['response_time']:.2f}s")
-                print(f"   Page title: {result['metadata'].get('page_title', 'N/A')}")
+                print(f"   Response time: {result['metadata_']['response_time']:.2f}s")
+                print(f"   Page title: {result['metadata_'].get('page_title', 'N/A')}")
                 
                 if scraper_type == "scrapingbee":
-                    print(f"   API cost: {result['metadata'].get('api_cost', 'N/A')} credits")
+                    print(f"   API cost: {result['metadata_'].get('api_cost', 'N/A')} credits")
                 
         except Exception as e:
             print(f"{description}: ❌ Failed - {e}")

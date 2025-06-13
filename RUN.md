@@ -90,6 +90,10 @@ cd src
 # Install dependencies (includes Playwright)
 pip install -r requirements.txt
 
+# Add playwright to path
+export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+source ~/.zshrc  # or ~/.bash_profile
+
 # Install Playwright browsers (required for local development)
 playwright install chromium
 

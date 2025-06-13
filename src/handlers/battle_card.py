@@ -6,9 +6,9 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List
 import uuid
 
-from langchain.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage, SystemMessage
-from langchain.callbacks import get_openai_callback
+from langchain_community.callbacks.manager import get_openai_callback
 from sqlalchemy import select, desc
 
 from database import get_session, ensure_connection

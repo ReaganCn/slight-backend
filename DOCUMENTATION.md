@@ -260,8 +260,8 @@ SCRAPINGBEE_API_KEY=your_key        # Required for ScrapingBee
    - Playwright: Browser automation with full JS support
    - ScrapingBee: API service with proxy rotation
 3. **HTML Parsing**: BeautifulSoup with intelligent selectors
-4. **Data Extraction**: Pricing, features, metadata using enhanced selectors
-5. **Storage**: Save results with scraper metadata and performance metrics
+4. **Data Extraction**: Pricing, features, metadata_ using enhanced selectors
+5. **Storage**: Save results with scraper metadata_ and performance metrics
 6. **Error Handling**: Fallback logic and retry mechanisms
 
 **Event Formats:**

@@ -56,7 +56,7 @@ class BaseScraper(ABC):
                     'plans': List[str],
                     'plan_count': int
                 },
-                'metadata': {
+                'metadata_': {
                     'scrape_method': str,
                     'page_title': str,
                     'response_time': float,
@@ -76,7 +76,7 @@ class BaseScraper(ABC):
         Get information about this scraper implementation
         
         Returns:
-            Dictionary with scraper metadata
+            Dictionary with scraper metadata_
         """
         pass
     
