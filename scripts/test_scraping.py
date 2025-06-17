@@ -40,8 +40,10 @@ async def test_playwright_scraper():
     try:
         async with PlaywrightScraper() as scraper:
             # Test with a simple page
-            url = "https://httpbin.org/html"
-            result = await scraper.scrape_url(url, "HttpBin Test")
+            url = "https://www.cursor.com/pricing"
+            result = await scraper.scrape_url(url, "Cursor AI Pricing Test")
+
+            print("result", result)
             
             print(f"✅ Playwright test successful!")
             print(f"   URL: {url}")
@@ -92,8 +94,8 @@ async def test_auto_scraper():
             print(f"Auto-detected scraper: {info['name']}")
             
             # Test with a simple page
-            url = "https://httpbin.org/html"
-            result = await scraper.scrape_url(url, "HttpBin Test")
+            url = "https://www.cursor.com/pricing"
+            result = await scraper.scrape_url(url, "Cursor AI Pricing Test")
             
             print(f"✅ Auto-detection test successful!")
             print(f"   Selected: {info['name']} ({info['cost']})")
@@ -136,7 +138,7 @@ async def test_pricing_page():
     
     # Use a simple pricing page for testing
     test_urls = [
-        ("https://httpbin.org/html", "HttpBin Test Page"),
+        ("https://www.cursor.com/pricing", "Cursor AI Pricing Page"),
         # Add more test URLs here if needed
     ]
     
@@ -148,7 +150,7 @@ async def test_pricing_page():
                 
                 result = await scraper.scrape_url(url, name)
                 
-                prices = result.get('prices', {})
+                prices = result.get('price', {})
                 features = result.get('features', {})
                 
                 print(f"✅ {name}:")
@@ -176,7 +178,7 @@ async def demonstrate_switching():
     if os.getenv('SCRAPINGBEE_API_KEY'):
         scrapers_to_test.append(("scrapingbee", "🐝 ScrapingBee (PAID)"))
     
-    url = "https://httpbin.org/html"
+    url = "https://www.cursor.com/pricing"
     
     for scraper_type, description in scrapers_to_test:
         try:
@@ -227,23 +229,23 @@ async def main():
     print_environment_info()
     
     # Test scraper information
-    await test_scraper_info()
+    # await test_scraper_info()
     
     # Test factory creation
-    await test_factory_creation()
+    # await test_factory_creation()
     
     # Test individual scrapers
-    await test_playwright_scraper()
-    await test_scrapingbee_scraper()
+    # await test_playwright_scraper()
+    # await test_scrapingbee_scraper()
     
     # Test auto-detection
-    await test_auto_scraper()
+    # await test_auto_scraper()
     
     # Test real pricing page
     await test_pricing_page()
     
     # Demonstrate switching
-    await demonstrate_switching()
+    # await demonstrate_switching()
     
     print("🎉 Testing complete!")
     print()

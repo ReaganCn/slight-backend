@@ -82,9 +82,9 @@ async def test_competitor_management(user_id):
         
         # Create test competitor
         competitor_data = {
-            'name': 'Test Competitor',
-            'website': 'https://example.com',
-            'pricing_url': 'https://example.com/pricing',
+            'name': 'Cursor AI',
+            'website': 'https://www.cursor.com',
+            'pricing_url': 'https://www.cursor.com/pricing',
             'description': 'A test competitor for validation',
             'scrape_frequency_hours': '6'
         }
