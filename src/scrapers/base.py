@@ -7,6 +7,8 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
 import logging
 
+from .cohere import get_pricing_and_features_with_cohere
+
 logger = logging.getLogger(__name__)
 
 class BaseScraper(ABC):
@@ -168,3 +170,6 @@ class BaseScraper(ABC):
             logger.info(log_msg)
         else:
             logger.error(f"{log_msg} - Error: {error}") 
+
+    def get_pricing_and_features_with_cohere(self, html_content: str):
+        return get_pricing_and_features_with_cohere(html_content)

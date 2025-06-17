@@ -4,6 +4,7 @@ Free alternative to ScrapingBee with full JavaScript support.
 """
 
 import asyncio
+import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -161,22 +162,30 @@ class PlaywrightScraper(BaseScraper):
             response_time = (datetime.now() - start_time).total_seconds()
             
             # Parse with BeautifulSoup
-            soup = BeautifulSoup(html_content, 'html.parser')
+            # soup = BeautifulSoup(html_content, 'html.parser')
+
+            # print("html_content", html_content)
             
             # Extract pricing and features
-            extracted_data = await self._extract_data(soup, competitor_name, url)
-            
-            # Add metadata_
-            extracted_data['metadata_'] = {
-                'scrape_method': 'playwright',
-                'page_title': page_title,
-                'response_time': response_time,
-                'scraped_at': datetime.now(timezone.utc).isoformat(),
-                'url': url,
-                'status_code': response.status if response else 0,
-                'user_agent': self.config['user_agent'],
-                'viewport': self.config['viewport'],
-                'browser': 'chromium'
+            # extracted_data = await self._extract_data(soup, competitor_name, url)
+
+            fetched_data = self.get_pricing_and_features_with_cohere(html_content)
+
+            plans_list = json.loads(fetched_data)
+   
+            extracted_data = {
+                'plans': plans_list,
+                'metadata_': {
+                    'scrape_method': 'playwright',
+                    'page_title': page_title,
+                    'response_time': response_time,
+                    'scraped_at': datetime.now(timezone.utc).isoformat(),
+                    'url': url,
+                    'status_code': response.status if response else 0,
+                    'user_agent': self.config['user_agent'],
+                    'viewport': self.config['viewport'],
+                    'browser': 'chromium'
+                }
             }
             
             # Log successful scrape
