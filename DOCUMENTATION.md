@@ -17,19 +17,19 @@ The system follows a **serverless microservices architecture** with the followin
          │              ┌─────────────────┐              │
          └──────────────│  External APIs  │──────────────┘
                         │ • ScrapingBee   │
+                        │ • Cohere AI     │
                         │ • OpenAI GPT-4  │
-                        │ • LangChain     │
                         │ • Social Media  │
-                        │ • DuckDuckGo    │
+                        │ • Search APIs   │
                         └─────────────────┘
 ```
 
-**Data Flow:**
+**🆕 Optimized Data Flow:**
 1. **API Gateway** receives HTTP requests
-2. **Lambda Functions** process business logic
-3. **Services Layer** handles complex operations (URL discovery, social media)
-4. **Database Layer** handles data persistence
-5. **External APIs** provide scraping, AI, and social media capabilities
+2. **Lambda Functions** process business logic with confidence validation
+3. **Services Layer** handles optimized URL discovery with multi-layer confidence scoring
+4. **Database Layer** handles data persistence with confidence metadata
+5. **External APIs** provide scraping, AI, and social media capabilities with smart fallbacks
 
 ---
 
@@ -43,46 +43,83 @@ The system follows a **serverless microservices architecture** with the followin
 
 **Key Resources Defined:**
 - **VPC & Networking**: Custom VPC, subnets, security groups
-- **RDS PostgreSQL**: Database instance with proper security
-- **Lambda Functions**: All serverless functions with VPC config
-- **API Gateway**: RESTful endpoints with CORS
+- **RDS PostgreSQL**: Database instance with enhanced schema for confidence validation
+- **Lambda Functions**: All serverless functions with optimized memory and timeout settings
+- **API Gateway**: RESTful endpoints with confidence validation parameters
 - **IAM Roles**: Least-privilege security policies
 
-**Critical Sections:**
+**🆕 Enhanced Sections:**
 ```yaml
-# Database Definition
+# Enhanced Database Definition with Confidence Validation
 CompetitorDB:
   Type: AWS::RDS::DBInstance
   Properties:
     Engine: postgres
     DBInstanceClass: db.t3.micro
+    # Enhanced schema supports confidence validation
 
-# Lambda Function Example
-ScrapeCompetitorFunction:
+# Optimized Lambda Function for URL Discovery
+URLDiscoveryFunction:
   Type: AWS::Serverless::Function
   Properties:
     CodeUri: src/
-    Handler: handlers.scrape_competitor.handler
+    Handler: handlers.url_discovery.handler
+    Environment:
+      Variables:
+        CONFIDENCE_THRESHOLD: !Ref ConfidenceThreshold
+        COHERE_API_KEY: !Ref CohereApiKey
+        OPENAI_API_KEY: !Ref OpenAIApiKey
 ```
 
 ---
 
 ### **💾 Database Layer**
 
-#### `src/models.py` - **Enhanced Data Models & Schema**
-**Purpose:** SQLAlchemy ORM models defining database schema
+#### `src/models.py` - **Enhanced Data Models with Confidence Validation**
+**Purpose:** SQLAlchemy ORM models defining database schema with confidence tracking
 **Entry Point:** Imported by all handlers for database operations
 
 **Core Models:**
 - **`User`**: Multi-tenant user management
-- **`Competitor`**: Competitor profiles and scraping configuration
+- **`Competitor`**: Competitor profiles with confidence validation status
 - **`ScrapeResult`**: Historical pricing/feature data (JSONB storage)
-- **`BattleCard`**: AI-generated competitive intelligence
+- **`BattleCard`**: AI-generated competitive intelligence with confidence metadata
 - **`ScrapeJob`**: Job tracking and status monitoring
 
-**🆕 NEW: Enhanced Models:**
-- **`CompetitorUrl`**: Discovered URLs with confidence scores and categories
-- **`SocialMediaData`**: Social media metrics and engagement data
+**🆕 Enhanced Models with Confidence Validation:**
+
+**CompetitorUrl Model (Enhanced):**
+```python
+class CompetitorUrl(Base):
+    __tablename__ = "competitor_urls"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    competitor_id = Column(UUID(as_uuid=True), ForeignKey("competitors.id"))
+    
+    # URL Information
+    url = Column(String(1000), nullable=False)
+    category = Column(String(100))  # pricing, features, blog, social, etc.
+    
+    # 🆕 Multi-Layer Confidence Validation
+    confidence_score = Column(Float)           # Overall confidence (0.0-1.0)
+    brand_confidence = Column(Float)           # Brand recognition confidence
+    ranking_confidence = Column(Float)         # URL ranking confidence
+    selection_confidence = Column(Float)       # URL selection confidence
+    
+    # Status Management
+    status = Column(String(50), default="pending")  # pending, confirmed, rejected, filtered
+    discovered_at = Column(DateTime(timezone=True), default=func.now())
+    
+    # Discovery Metadata
+    discovery_method = Column(String(100))     # optimized_workflow, search_rank_select
+    page_title = Column(String(500))
+    page_description = Column(Text)
+    
+    # 🆕 Confidence Validation Metadata
+    validation_reason = Column(Text)           # Why this URL was accepted/rejected
+    llm_used = Column(String(50))             # cohere, openai, pattern_matching
+    threshold_used = Column(Float)            # Confidence threshold applied
+```
 
 **Enhanced Competitor Model:**
 ```python
@@ -96,9 +133,11 @@ class Competitor(Base):
     name = Column(String(200), nullable=False)
     website = Column(String(500))
     
-    # URL Discovery Status
+    # 🆕 Enhanced URL Discovery Status with Confidence Validation
     url_discovery_status = Column(String(50), default="pending")
     url_discovery_last_run = Column(DateTime(timezone=True))
+    brand_recognition_confidence = Column(Float)  # Overall brand confidence
+    confidence_threshold_used = Column(Float)     # Threshold applied during discovery
     
     # Relationships
     scrape_results = relationship("ScrapeResult", back_populates="competitor")
@@ -106,92 +145,23 @@ class Competitor(Base):
     social_media_data = relationship("SocialMediaData", back_populates="competitor")
 ```
 
-**CompetitorUrl Model:**
-```python
-class CompetitorUrl(Base):
-    __tablename__ = "competitor_urls"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    competitor_id = Column(UUID(as_uuid=True), ForeignKey("competitors.id"))
-    
-    # URL Information
-    url = Column(String(1000), nullable=False)
-    category = Column(String(100))  # pricing, features, blog, social, etc.
-    confidence_score = Column(Float)
-    
-    # Status Management
-    status = Column(String(50), default="pending")  # pending, confirmed, rejected
-    discovered_at = Column(DateTime(timezone=True), default=func.now())
-    
-    # Discovery Metadata
-    discovery_method = Column(String(100))  # search, sitemap, ai_analysis
-    page_title = Column(String(500))
-    page_description = Column(Text)
-```
-
-**SocialMediaData Model:**
-```python
-class SocialMediaData(Base):
-    __tablename__ = "social_media_data"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    competitor_id = Column(UUID(as_uuid=True), ForeignKey("competitors.id"))
-    
-    # Platform Information
-    platform = Column(String(50), nullable=False)  # linkedin, twitter, instagram, tiktok
-    profile_url = Column(String(500))
-    username = Column(String(200))
-    
-    # Metrics
-    followers_count = Column(Integer)
-    following_count = Column(Integer)
-    posts_count = Column(Integer)
-    engagement_rate = Column(Float)
-    
-    # Profile Data
-    profile_data = Column(JSON)  # Flexible storage for platform-specific data
-    recent_posts = Column(JSON)  # Recent posts with engagement metrics
-    
-    # Metadata
-    fetched_at = Column(DateTime(timezone=True), default=func.now())
-    fetch_status = Column(String(50), default="success")
-```
-
-#### `src/database.py` - **Database Connection Management**
-**Purpose:** Async database connections and session management
-**Entry Point:** Imported by all handlers for database access
-
-**Key Functions:**
-- **`get_session()`**: Async context manager for database sessions
-- **`ensure_connection()`**: Connection retry logic for Lambda cold starts
-- **`init_database()`**: Schema creation and migrations
-- **Utility functions**: Common database operations
-
-**Usage Pattern:**
-```python
-async with get_session() as session:
-    result = await session.execute(select(Competitor))
-    competitors = result.scalars().all()
-```
-
 ---
 
-### **🆕 Services Layer (NEW)**
+### **🆕 Services Layer (Optimized)**
 
-#### `src/services/url_discovery.py` - **Intelligent URL Discovery Service**
-**Purpose:** LangChain-powered automatic discovery of competitor URLs with Cohere-first AI strategy
+#### `src/services/url_discovery.py` - **Optimized URL Discovery Service with Confidence Validation**
+**Purpose:** Streamlined 3-step workflow with multi-layer confidence validation for reliable competitive intelligence
 **Entry Point:** Used by URL discovery handler
 
-**Key Features:**
-- **Google Custom Search**: High-quality search results (100 free queries/day)
-- **Brave Search API**: Independent search index (2,000 free queries/month)
-- **Sitemap Analysis**: Automated sitemap parsing and categorization
-- **Confidence Scoring**: ML-based relevance assessment for discovered URLs
-- **Category Detection**: Automatic categorization (pricing, features, blog, social)
-- **Cohere-First AI**: Fast, reliable AI categorization with OpenAI fallback
-- **Smart Error Handling**: Intelligent quota detection and immediate fallback switching
+**🆕 Key Features:**
+- **Optimized Workflow**: Search → LLM Rank → LLM Select (simplified from complex batching)
+- **Confidence Validation**: Multi-layer validation prevents wrong results for lesser-known companies
+- **Flexible LLM Selection**: Choose different AI models for ranking vs selection
+- **Brand Recognition**: AI validates if company is well-known enough for reliable results
+- **Configurable Thresholds**: Adjust precision based on use case (0.3-0.8)
+- **Graceful Degradation**: Returns empty results rather than wrong data
 
-**Core Class:**
+**Core Class (Enhanced):**
 ```python
 class URLDiscoveryService:
     def __init__(self, cohere_api_key: str = None,
@@ -204,228 +174,204 @@ class URLDiscoveryService:
         self.openai_llm = ChatOpenAI(model="gpt-4", api_key=openai_api_key, max_retries=1)
         self._init_search_tools()  # Initialize Google CSE and Brave Search
         
-    async def discover_competitor_urls(self, competitor_name: str, base_url: str) -> List[DiscoveredURL]:
-        """Main discovery pipeline with Cohere-first AI categorization"""
-        urls = []
-        urls.extend(await self._search_based_discovery(competitor_name))
-        urls.extend(await self._sitemap_analysis(base_url))
-        urls = await self._ai_categorize_url_with_fallback(urls, competitor_name)
-        return self._deduplicate_and_score(urls)
-```
-
-**Discovery Methods:**
-- **Google Custom Search**: Premium quality search results with high reliability
-- **Brave Search API**: Independent search index with privacy focus
-- **Sitemap analysis**: Parses XML sitemaps for comprehensive URL discovery
-- **Cohere-first AI**: Fast, cost-effective categorization and confidence scoring
-- **OpenAI fallback**: Premium quality analysis when Cohere unavailable
-- **Social media detection**: Automatic social profile discovery
-- **Smart error handling**: Quota detection and immediate fallback switching
-
-#### `src/services/social_media.py` - **Social Media Integration Service**
-**Purpose:** Unified social media data fetching across multiple platforms
-**Entry Point:** Used by social media handler
-
-**Supported Platforms:**
-- **Twitter/X**: Official API v2 integration
-- **LinkedIn**: Unofficial API for company data
-- **Instagram**: Business account metrics
-- **TikTok**: Video performance and follower data
-
-**Core Class:**
-```python
-class SocialMediaFetcher:
-    def __init__(self, config: Dict[str, str]):
-        self.twitter_client = self._init_twitter(config)
-        self.linkedin_client = self._init_linkedin(config)
-        self.instagram_client = self._init_instagram(config)
-        self.tiktok_client = self._init_tiktok(config)
-    
-    async def fetch_all_platforms(self, competitor_id: str, social_urls: Dict[str, str]) -> Dict[str, Any]:
-        """Fetch data from all available platforms in parallel"""
-        tasks = []
-        for platform, url in social_urls.items():
-            if hasattr(self, f'fetch_{platform}'):
-                tasks.append(getattr(self, f'fetch_{platform}')(url))
+    async def discover_competitor_urls(self, competitor_name: str, base_url: str,
+                                     categories: List[str] = None,
+                                     ranking_llm: str = "cohere",
+                                     selection_llm: str = "cohere",
+                                     min_confidence_threshold: float = 0.6) -> List[Dict]:
+        """
+        🆕 Optimized discovery pipeline with confidence validation
         
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        return self._process_results(results)
+        Args:
+            competitor_name: Company name
+            base_url: Company website
+            categories: Categories to discover (pricing, features, blog)
+            ranking_llm: LLM for ranking URLs (cohere/openai)
+            selection_llm: LLM for selecting best URL (cohere/openai) 
+            min_confidence_threshold: Minimum confidence required (0.0-1.0)
+            
+        Returns:
+            List of discovered URLs with confidence scores
+        """
+        
+        # Step 1: Brand Recognition Validation
+        brand_validation = await self._validate_brand_recognition(competitor_name, base_url)
+        if not brand_validation['is_recognized'] or brand_validation['confidence'] < min_confidence_threshold:
+            return []  # Graceful degradation for unknown companies
+            
+        discovered_urls = []
+        categories = categories or ["pricing", "features", "blog"]
+        
+        for category in categories:
+            # Step 2: Search engines do implicit categorization
+            search_results = await self._search_for_category(competitor_name, category)
+            
+            # Step 3: LLM ranks top 10 most relevant URLs
+            ranked_urls = await self._llm_rank_urls_for_category_with_confidence(
+                search_results, competitor_name, category, ranking_llm
+            )
+            
+            # Step 4: LLM selects single best URL from top 10
+            if ranked_urls:
+                selected_url = await self._llm_select_best_url_with_confidence(
+                    ranked_urls[:10], competitor_name, category, selection_llm
+                )
+                
+                if selected_url and selected_url.get('confidence_score', 0) >= min_confidence_threshold:
+                    # Add multi-layer confidence metadata
+                    selected_url.update({
+                        'brand_confidence': brand_validation['confidence'],
+                        'ranking_confidence': ranked_urls[0].get('confidence_score', 0),
+                        'selection_confidence': selected_url.get('confidence_score', 0),
+                        'overall_confidence': min(
+                            brand_validation['confidence'],
+                            ranked_urls[0].get('confidence_score', 0),
+                            selected_url.get('confidence_score', 0)
+                        ),
+                        'threshold_used': min_confidence_threshold,
+                        'llm_used': f"ranking:{ranking_llm},selection:{selection_llm}"
+                    })
+                    discovered_urls.append(selected_url)
+                    
+        return discovered_urls
 ```
 
-**Features:**
-- **Parallel Processing**: Fetch from multiple platforms simultaneously
-- **Error Handling**: Graceful failure handling for API rate limits
-- **Data Standardization**: Unified data format across platforms
-- **Historical Tracking**: Store metrics over time for trend analysis
+**🆕 Confidence Validation Methods:**
+```python
+async def _validate_brand_recognition(self, competitor_name: str, base_url: str) -> Dict:
+    """Validate if company is well-known enough for reliable results"""
+    
+async def _validate_discovered_domains(self, domains: List[str], competitor_name: str) -> Dict:
+    """Ensure discovered domains actually belong to the company"""
+    
+async def _llm_rank_urls_for_category_with_confidence(self, search_results: List, 
+                                                    competitor_name: str, 
+                                                    category: str,
+                                                    llm_choice: str) -> List[Dict]:
+    """Rank URLs with confidence scores, can return NO_RELEVANT_URLS"""
+    
+async def _llm_select_best_url_with_confidence(self, ranked_urls: List[Dict],
+                                             competitor_name: str,
+                                             category: str, 
+                                             llm_choice: str) -> Dict:
+    """Select best URL with confidence, can return NO_SUITABLE_URL"""
+```
 
----
-
-### **🕷️ Enhanced Scraping Module**
-
-#### `src/scrapers/` - **Scraping Architecture**
-**Purpose:** Modular scraping implementations with unified interface
-**Entry Point:** Used by `EnhancedCompetitorScraper` in handlers
-
-**Key Components:**
-
-#### `src/scrapers/base.py` - **Base Scraper Interface**
-**Purpose:** Abstract base class ensuring consistent API across all scrapers
-**Key Features:**
-- **Unified Interface**: All scrapers implement the same methods
-- **Common Utilities**: Shared price pattern analysis and logging
-- **Type Safety**: Enforced method signatures and return types
-
-#### `src/scrapers/playwright_scraper.py` - **FREE Browser Automation**
-**Purpose:** Playwright-based scraper for full JavaScript support
-**Key Features:**
-- **Zero API Costs**: Completely free to use
-- **Full JS Rendering**: Handles React/Vue/Angular apps
-- **Smart Selectors**: Enhanced price and feature extraction
-- **Lambda Optimized**: Configured for serverless deployment
-
-#### `src/scrapers/scrapingbee_scraper.py` - **PAID API Service**
-**Purpose:** ScrapingBee API integration for premium scraping features
-**Key Features:**
-- **Professional Proxies**: Rotating residential/datacenter IPs
-- **Advanced Anti-Bot**: Bypasses CAPTCHAs and detection systems
-- **Geographic Targeting**: Scrape from different countries
-- **High Reliability**: Enterprise-grade infrastructure
-
-#### `src/scrapers/factory.py` - **Scraper Factory & Auto-Detection**
-**Purpose:** Smart scraper selection and instantiation
-**Key Features:**
-- **Auto-Detection**: Chooses best scraper based on environment
-- **Fallback Logic**: ScrapingBee → Playwright if needed
-- **Environment Parsing**: Reads `PREFERRED_SCRAPER` variable
-- **Easy Switching**: Runtime scraper selection
+**🆕 Discovery Workflow:**
+1. **Brand Recognition Validation**: AI validates if company is well-known enough
+2. **Search-Based Discovery**: Use search engines for implicit categorization
+3. **LLM Ranking**: Rank top 10 most relevant URLs per category with confidence
+4. **LLM Selection**: Select single best URL from top 10 with confidence
+5. **Multi-Layer Confidence**: Combine brand, ranking, and selection confidence scores
+6. **Threshold Filtering**: Filter results below minimum confidence threshold
 
 ---
 
 ### **⚡ Lambda Handlers (Enhanced Entry Points)**
 
-#### `src/handlers/competitor_management.py` - **🏢 Competitor CRUD Operations**
-**Entry Point:** API Gateway `/competitors` endpoints
-**HTTP Methods:** GET, POST, PUT, DELETE
-
-**Enhanced with URL Discovery Integration:**
-- **`create_competitor()`**: Optionally trigger URL discovery on creation
-- **`get_competitors()`**: Include URL discovery status in responses
-- **`get_competitor()`**: Return discovered URLs and social media data
-- **URL discovery status tracking**: pending, in_progress, completed, failed
-
-**API Routes Handled:**
-```
-POST   /competitors           # Create competitor (with optional URL discovery)
-GET    /competitors           # List competitors (with discovery status)
-GET    /competitors/{id}      # Get competitor (with URLs and social data)
-PUT    /competitors/{id}      # Update competitor
-DELETE /competitors/{id}      # Delete competitor
-```
-
-#### `src/handlers/url_discovery.py` - **🔍 NEW: Intelligent URL Discovery**
+#### `src/handlers/url_discovery.py` - **🔍 Optimized URL Discovery with Confidence Validation**
 **Entry Point:** API Gateway `/competitors/{id}/discover-urls` and related endpoints
 
-**Key Functions:**
-- **`discover_urls()`**: Trigger URL discovery for a competitor
-- **`get_discovered_urls()`**: Retrieve discovered URLs with status
-- **`confirm_urls()`**: User confirmation workflow for discovered URLs
-- **`get_discovery_status()`**: Check discovery job status
+**🆕 Enhanced Functions:**
+- **`discover_urls_optimized()`**: Trigger optimized URL discovery with confidence validation
+- **`get_discovered_urls_with_confidence()`**: Retrieve URLs with confidence scores
+- **`confirm_urls_with_confidence()`**: User confirmation workflow with confidence metadata
+- **`get_confidence_validation_status()`**: Check confidence validation effectiveness
 
 **API Routes Handled:**
 ```
-POST   /competitors/{id}/discover-urls     # Trigger URL discovery
-GET    /competitors/{id}/urls              # List discovered URLs
-PUT    /competitors/{id}/urls              # Confirm/reject URLs
-GET    /competitors/{id}/urls/status       # Discovery status
+POST   /competitors/{id}/discover-urls     # Optimized discovery with confidence validation
+GET    /competitors/{id}/urls              # List URLs with confidence scores
+PUT    /competitors/{id}/urls              # Confirm/reject URLs with confidence metadata
+GET    /competitors/{id}/confidence-stats  # Confidence validation statistics
 ```
 
-**Discovery Pipeline:**
-1. **Initialize Discovery**: Create discovery job record
-2. **URL Discovery**: Use LangChain service to find relevant URLs
-3. **Categorization**: Classify URLs by type (pricing, features, blog, social)
-4. **Confidence Scoring**: ML-based relevance assessment
-5. **User Confirmation**: Present URLs for user review
-6. **Status Tracking**: Monitor discovery progress and results
+**🆕 Enhanced Discovery Pipeline:**
+1. **Initialize Discovery**: Create discovery job with confidence settings
+2. **Brand Validation**: Validate if company is well-known enough
+3. **Optimized URL Discovery**: Use streamlined 3-step workflow
+4. **Confidence Filtering**: Apply multi-layer confidence validation
+5. **User Confirmation**: Present URLs with confidence scores for review
+6. **Status Tracking**: Monitor discovery progress and confidence effectiveness
 
-#### `src/handlers/social_media.py` - **📱 NEW: Social Media Integration**
-**Entry Point:** API Gateway `/competitors/{id}/social-media` endpoints
-
-**Key Functions:**
-- **`fetch_social_data()`**: Fetch fresh social media data
-- **`get_social_data()`**: Retrieve stored social media metrics
-- **`fetch_platform_data()`**: Fetch data from specific platform
-- **`get_social_trends()`**: Analyze historical social media trends
-
-**API Routes Handled:**
-```
-GET    /competitors/{id}/social-media                # Get stored social data
-POST   /competitors/{id}/social-media               # Fetch fresh social data
-POST   /competitors/{id}/social-media/{platform}    # Fetch specific platform
-GET    /competitors/{id}/social-media/trends        # Historical trends
+**🆕 Enhanced Request Format:**
+```json
+{
+  "search_depth": "standard",
+  "categories": ["pricing", "features", "blog"],
+  "ranking_llm": "cohere",
+  "selection_llm": "cohere",
+  "min_confidence_threshold": 0.6
+}
 ```
 
-**Social Media Pipeline:**
-1. **Platform Detection**: Identify social media URLs from discovered URLs
-2. **Parallel Fetching**: Fetch data from multiple platforms simultaneously
-3. **Data Standardization**: Normalize data across different platforms
-4. **Historical Storage**: Store metrics for trend analysis
-5. **Error Handling**: Graceful handling of API rate limits and errors
+**🆕 Enhanced Response Format:**
+```json
+{
+  "discovered_urls": [
+    {
+      "url": "https://company.com/pricing",
+      "category": "pricing",
+      "confidence_score": 0.85,
+      "brand_confidence": 0.80,
+      "ranking_confidence": 0.90,
+      "selection_confidence": 0.85,
+      "overall_confidence": 0.80,
+      "validation_reason": "High-quality pricing page with clear subscription tiers",
+      "llm_used": "ranking:cohere,selection:cohere",
+      "threshold_used": 0.6
+    }
+  ],
+  "confidence_validation": {
+    "brand_recognized": true,
+    "brand_confidence": 0.80,
+    "total_discovered": 3,
+    "high_confidence": 2,
+    "filtered_out": 1,
+    "threshold_used": 0.6
+  }
+}
+```
 
-#### `src/handlers/scrape_competitor.py` - **🕷️ Enhanced Web Scraping Engine**
+#### `src/handlers/scrape_competitor.py` - **🕷️ Enhanced Web Scraping with Confidence Integration**
 **Entry Point 1:** API Gateway `/competitors/{id}/scrape-*` endpoints
 **Entry Point 2:** CloudWatch Events (scheduled scraping every 6 hours)
 
-**🎯 Enhanced Scraping Architecture:**
-The system now supports **URL-category-aware scraping** with the new `EnhancedCompetitorScraper` class:
+**🆕 Enhanced Scraping Architecture:**
+The system now integrates confidence validation into scraping decisions:
 
 **Key Classes & Functions:**
-- **`EnhancedCompetitorScraper`**: URL discovery integration with category-aware scraping
-- **`scrape_all_competitor_urls()`**: Scrape all confirmed URLs for a competitor
-- **`scrape_by_category()`**: Scrape URLs of specific category (pricing, features, blog)
-- **`scrape_discovered_url()`**: Scrape individual discovered URL with context
+- **`EnhancedCompetitorScraper`**: Confidence-aware scraping with priority-based URL selection
+- **`scrape_high_confidence_urls()`**: Prioritize scraping URLs with high confidence scores
+- **`scrape_by_confidence_threshold()`**: Scrape URLs meeting minimum confidence threshold
+- **`scrape_with_confidence_metadata()`**: Include confidence context in scraped data
 
-**Enhanced API Routes:**
+**🆕 Enhanced API Routes:**
 ```
-POST   /competitors/{id}/scrape-all         # Scrape all confirmed URLs
-POST   /competitors/{id}/scrape-category    # Scrape specific URL category
-POST   /competitors/{id}/scrape-discovered  # Scrape specific discovered URL
+POST   /competitors/{id}/scrape-high-confidence    # Scrape only high-confidence URLs
+POST   /competitors/{id}/scrape-by-threshold       # Scrape URLs above confidence threshold
+POST   /competitors/{id}/scrape-category-confident # Scrape category with confidence filtering
 ```
 
-**Enhanced Scraping Pipeline:**
-1. **URL Selection**: Choose URLs based on category and confirmation status
-2. **Context-Aware Scraping**: Different strategies for pricing vs. blog pages
-3. **Batch Processing**: Efficiently scrape multiple URLs
-4. **Enhanced Metadata**: Rich context about scraped data and source URLs
-5. **Error Handling**: Fallback logic and retry mechanisms
-
-#### `src/handlers/battle_card.py` - **⚔️ Enhanced AI Battle Card Generation**
+#### `src/handlers/battle_card.py` - **⚔️ Enhanced AI Battle Card Generation with Confidence Context**
 **Entry Point:** API Gateway `/battle-card` endpoint
 
-**Enhanced with URL Discovery Data:**
-- **Richer Context**: Uses discovered URLs and social media data
-- **Category-Specific Analysis**: Pricing vs. feature comparison insights
-- **Social Intelligence**: Incorporates social media metrics and trends
-- **Enhanced Prompts**: More comprehensive competitive analysis
+**🆕 Enhanced with Confidence Validation:**
+- **Confidence-Weighted Analysis**: Weight insights based on URL confidence scores
+- **Reliability Indicators**: Include confidence metadata in battle card outputs
+- **Source Quality Assessment**: Highlight high-confidence vs. lower-confidence insights
+- **Transparent Limitations**: Clearly indicate when data is limited due to confidence filtering
 
-**Enhanced Battle Card Structure:**
-- Executive Summary
-- Competitive Positioning Matrix
-- Comprehensive Pricing Analysis (from discovered pricing pages)
-- Feature Gaps & Advantages (from discovered feature pages)
-- Content Strategy Analysis (from discovered blog pages)
+**🆕 Enhanced Battle Card Structure:**
+- Executive Summary (with confidence indicators)
+- Competitive Positioning Matrix (confidence-weighted)
+- High-Confidence Pricing Analysis (from validated pricing pages)
+- Reliable Feature Gaps & Advantages (from high-confidence feature pages)
+- Validated Content Strategy Analysis (from confident blog pages)
 - Social Media Presence Comparison
-- Sales Objection Handling
-- Win/Loss Factors
-- Recommended Messaging
-
-#### `src/handlers/migrations.py` - **🔄 Enhanced Database Management**
-**Entry Point:** Manual Lambda invocation for database operations
-
-**Enhanced Functions:**
-- **`run_migrations()`**: Create enhanced database schema with new tables
-- **`create_test_user()`**: Initialize test data including discovered URLs
-- **`migrate_existing_data()`**: Migrate existing competitors to new schema
-- **Health check functions**: Verify database connectivity and new tables
+- Confidence-Based Recommendations
+- Data Quality Assessment
+- Source Reliability Indicators
 
 ---
 
@@ -434,65 +380,73 @@ POST   /competitors/{id}/scrape-discovered  # Scrape specific discovered URL
 #### `src/requirements.txt` - **Enhanced Python Dependencies**
 **Purpose:** Defines all Python packages required by Lambda functions
 
-**Enhanced Dependencies:**
+**🆕 Enhanced Dependencies:**
 ```txt
 # Database
-sqlalchemy==2.0.23      # Async ORM
+sqlalchemy==2.0.23      # Async ORM with confidence validation support
 asyncpg==0.29.0         # PostgreSQL async driver
 
-# Web Scraping
+# AI/ML & Search (Optimized)
+cohere==4.37.0          # Primary AI for cost-effective URL discovery
+openai==1.3.7           # Fallback AI for premium quality
+google-api-python-client==2.110.0  # Google Custom Search
+
+# Enhanced URL Processing
+validators==0.22.0      # URL validation with confidence checks
+requests-html==0.10.0   # Advanced web scraping with confidence metadata
+brave-search==1.0.0     # Brave Search API integration
+
+# Web Scraping (Unchanged)
 beautifulsoup4==4.12.2  # HTML parsing
 aiohttp==3.9.1          # Async HTTP client
 playwright==1.40.0      # Browser automation
 
-# AI/ML & Search
-langchain==0.0.350      # LLM framework
-openai==1.3.7           # GPT-4 integration
-duckduckgo-search==3.9.6 # Web search for URL discovery
-
-# Social Media APIs
+# Social Media APIs (Unchanged)
 tweepy==4.14.0          # Twitter API
 linkedin-api==2.0.0     # LinkedIn (unofficial)
 instagrapi==2.0.0       # Instagram (unofficial)
 TikTokApi==5.3.0        # TikTok API
 
-# URL Processing
-validators==0.22.0      # URL validation
-requests-html==0.10.0   # Advanced web scraping
-sitemap-parser==0.6.3   # Sitemap parsing
-
-# AWS
+# AWS (Unchanged)
 boto3==1.34.0           # AWS SDK
 ```
 
 #### `env.example` - **Enhanced Environment Configuration Template**
 **Purpose:** Template for local development environment variables
 
-**Enhanced Variables:**
+**🆕 Enhanced Variables:**
 ```bash
 # Database
 DATABASE_URL="postgresql+asyncpg://..."  # Database connection
 
-# Scraping (Choose your option)
-PREFERRED_SCRAPER="playwright"     # Free option
-PREFERRED_SCRAPER="scrapingbee"    # Paid option  
-PREFERRED_SCRAPER="auto"           # Smart detection
+# 🆕 Enhanced AI Configuration (Cohere-first strategy)
+COHERE_API_KEY="your-cohere-api-key"         # Primary AI for URL discovery (cost-effective)
+OPENAI_API_KEY="sk-your-actual-openai-key"   # Fallback AI for premium quality
 
-# Core API Keys
-OPENAI_API_KEY="sk-..."                 # GPT-4 access
-SCRAPINGBEE_API_KEY="..."               # Web scraping service (optional)
+# Scraping Configuration (Flexible Architecture)
+PREFERRED_SCRAPER="playwright"          # Free option
+PREFERRED_SCRAPER="scrapingbee"         # Paid option  
+PREFERRED_SCRAPER="auto"                # Smart detection
+SCRAPINGBEE_API_KEY="your-scrapingbee-key"  # Only needed if using ScrapingBee
 
-# 🆕 NEW: URL Discovery
-SERPAPI_KEY="your-serpapi-key"                    # Optional for enhanced search
-LANGCHAIN_SEARCH_RESULTS_LIMIT="10"              # Search result limit
-URL_DISCOVERY_CONFIDENCE_THRESHOLD="0.7"         # Confidence threshold
+# 🆕 Enhanced URL Discovery Configuration
+GOOGLE_CSE_API_KEY="your-google-cse-api-key"         # Google Custom Search (100 free/day)
+GOOGLE_CSE_ID="your-google-cse-id"                   # Custom Search Engine ID
+BRAVE_API_KEY="your-brave-api-key"                   # Brave Search (2,000 free/month)
+LANGCHAIN_SEARCH_RESULTS_LIMIT="10"                  # Search result limit
 
-# 🆕 NEW: Social Media APIs
+# 🆕 Confidence Validation Settings
+URL_DISCOVERY_CONFIDENCE_THRESHOLD="0.6"             # Default confidence threshold (0.0-1.0)
+# 0.8 = Conservative (high confidence required)
+# 0.6 = Balanced (recommended for most use cases)
+# 0.3 = Permissive (more results, potentially less reliable)
+
+# Social Media API Keys (Unchanged)
 TWITTER_BEARER_TOKEN="your_twitter_bearer_token"
-LINKEDIN_EMAIL="your_linkedin_email"             # For unofficial API
-LINKEDIN_PASSWORD="your_linkedin_password"       # For unofficial API
-INSTAGRAM_USERNAME="your_instagram_username"     # For unofficial API
-INSTAGRAM_PASSWORD="your_instagram_password"     # For unofficial API
+LINKEDIN_EMAIL="your_linkedin_email"             # For unofficial LinkedIn API
+LINKEDIN_PASSWORD="your_linkedin_password"       # Use app-specific password if 2FA enabled
+INSTAGRAM_USERNAME="your_instagram_username"     # For unofficial Instagram API
+INSTAGRAM_PASSWORD="your_instagram_password"     # Use app-specific password if 2FA enabled
 TIKTOK_ACCESS_TOKEN="your_tiktok_access_token"
 
 # Environment
@@ -501,252 +455,286 @@ ENVIRONMENT="dev"                       # Deployment environment
 
 ---
 
-### **🐳 Local Development**
-
-#### `docker-compose.yml` - **Local Infrastructure**
-**Purpose:** Local PostgreSQL database for development
-**Entry Point:** `docker-compose up -d postgres`
-
-**Services:**
-- **PostgreSQL 15**: Local database instance
-- **Adminer**: Database administration UI (http://localhost:8080)
-
-#### `scripts/init-db.sql` - **Database Initialization**
-**Purpose:** Initial database setup for local development
-**Entry Point:** Automatically executed when PostgreSQL starts
-
-**Operations:**
-- Enable UUID extension
-- Set timezone to UTC
-- Prepare for application schema creation
-
----
-
 ### **🚀 Deployment & Testing**
 
-#### `scripts/deploy.sh` - **Automated Deployment**
-**Purpose:** Streamlined AWS deployment with parameter management
-**Entry Point:** `./scripts/deploy.sh [options]`
-
-**Features:**
-- Parameter validation and prompts
-- SAM build and deploy automation
-- CloudFormation output parsing
-- Post-deployment instructions
-
-#### `scripts/test_local.py` - **Local Testing Framework**
-**Purpose:** Comprehensive testing and validation for local setup
-**Entry Point:** `python scripts/test_local.py`
-
-**Enhanced Test Coverage:**
-- Database connectivity
-- Migration execution (including new tables)
-- User creation
-- Competitor management
-- URL discovery service
-- Social media integration
-- Handler initialization
-- Data cleanup
-
-#### `scripts/test_url_discovery.py` - **🆕 NEW: URL Discovery Testing**
-**Purpose:** Comprehensive testing of URL discovery and social media features
-**Entry Point:** `python scripts/test_url_discovery.py`
+#### `scripts/test_confidence_validation.py` - **🆕 Confidence Validation Testing**
+**Purpose:** Comprehensive testing of confidence validation system with different company types
+**Entry Point:** `python scripts/test_confidence_validation.py`
 
 **Test Coverage:**
-- URL discovery service functionality
-- Social media API integration
-- Database model creation and relationships
-- Handler integration testing
-- End-to-end workflow validation
+- **Brand Recognition Validation**: Test with well-known, emerging, and unknown companies
+- **Multi-Layer Confidence**: Validate brand, ranking, and selection confidence scores
+- **Threshold Testing**: Test different confidence thresholds (0.3, 0.6, 0.8)
+- **Graceful Degradation**: Verify empty results for unknown companies
+- **LLM Fallback**: Test Cohere → OpenAI fallback scenarios
 
-#### `scripts/test_url_discovery_simple.py` - **🆕 NEW: Modular URL Discovery Testing**
-**Purpose:** Modular testing framework with selectable test configurations
+**Test Companies:**
+```python
+TEST_COMPANIES = [
+    ("Notion", "https://notion.so", "HIGH_CONFIDENCE"),      # Well-known
+    ("Cursor", "https://cursor.com", "MEDIUM_CONFIDENCE"),   # Emerging startup
+    ("FakeXYZ", "https://fakexyz.com", "LOW_CONFIDENCE")     # Unknown/fictional
+]
+
+CONFIDENCE_THRESHOLDS = [0.3, 0.6, 0.8]  # Low, Medium, High
+```
+
+#### `scripts/test_url_discovery_simple.py` - **🆕 Enhanced Modular Testing**
+**Purpose:** Modular testing framework with confidence validation and LLM selection
 **Entry Point:** `python scripts/test_url_discovery_simple.py`
 
-**Test Modules:**
-- **Configuration Status**: API keys and service availability
-- **Cohere-Primary Discovery**: Full URL discovery with Cohere-first AI
-- **AI Categorization Only**: Test just AI categorization performance
-- **Search Backends Only**: Test just search API functionality
-- **Performance Comparison**: Compare different AI configurations
+**🆕 Enhanced Test Modules:**
+```python
+# ✅ CONFIDENCE VALIDATION TEST (New - Recommended)
+TESTS_TO_RUN = [
+    "test_configuration_status",
+    "test_confidence_validation",
+    "test_optimized_discovery"
+]
 
-**Key Features:**
-- Easy test selection via `TESTS_TO_RUN` configuration
-- Cohere-first AI strategy validation
-- Performance metrics and timing analysis
-- Batch processing with progress tracking
-- Comprehensive error handling and fallback testing
+# 🛡️ BRAND RECOGNITION TEST (New)
+TESTS_TO_RUN = [
+    "test_configuration_status", 
+    "test_brand_recognition_validation"
+]
+
+# 🤖 LLM SELECTION TEST (Enhanced)
+TESTS_TO_RUN = [
+    "test_configuration_status",
+    "test_llm_combinations"
+]
+
+# ⚡ PERFORMANCE COMPARISON (Enhanced with confidence metrics)
+TESTS_TO_RUN = [
+    "test_configuration_status",
+    "test_performance_with_confidence"
+]
+```
 
 ---
 
 ## 🎯 Enhanced Feature Entry Points Summary
 
-### **1. Competitor Management (Enhanced)**
-- **Primary Entry:** `GET/POST/PUT/DELETE /competitors`
-- **Handler:** `src/handlers/competitor_management.py`
-- **Core Logic:** CRUD operations with URL discovery integration
-- **Database:** `Competitor`, `CompetitorUrl`, `SocialMediaData` models
-
-### **2. 🆕 URL Discovery System**
+### **1. 🆕 Optimized URL Discovery System (Enhanced)**
 - **Primary Entry:** `POST /competitors/{id}/discover-urls`
 - **Handler:** `src/handlers/url_discovery.py`
 - **Service:** `src/services/url_discovery.py`
-- **Core Logic:** LangChain-powered intelligent URL discovery with confidence scoring
-- **Database:** `CompetitorUrl` model with status tracking
+- **Core Logic:** Streamlined 3-step workflow with multi-layer confidence validation
+- **Database:** Enhanced `CompetitorUrl` model with confidence metadata
 
-### **3. 🆕 Social Media Integration**
-- **Primary Entry:** `GET/POST /competitors/{id}/social-media`
-- **Handler:** `src/handlers/social_media.py`
-- **Service:** `src/services/social_media.py`
-- **Core Logic:** Multi-platform social media data fetching and analysis
-- **Database:** `SocialMediaData` model with metrics tracking
+### **2. 🆕 Confidence Validation System**
+- **Primary Entry:** Integrated into all discovery endpoints
+- **Service:** `src/services/url_discovery.py` (validation methods)
+- **Core Logic:** Multi-layer validation prevents wrong results for lesser-known companies
+- **Database:** Enhanced models with confidence tracking
 
-### **4. Enhanced Web Scraping**
-- **Primary Entry:** `POST /competitors/{id}/scrape-*` or CloudWatch scheduled events
+### **3. Enhanced Web Scraping (Confidence-Aware)**
+- **Primary Entry:** `POST /competitors/{id}/scrape-*` with confidence filtering
 - **Handler:** `src/handlers/scrape_competitor.py`
-- **Core Logic:** Category-aware scraping with URL discovery integration
-- **Database:** Enhanced `ScrapeResult` and `ScrapeJob` models
+- **Core Logic:** Confidence-aware scraping with priority-based URL selection
+- **Database:** Enhanced `ScrapeResult` with confidence metadata
 
-### **5. Enhanced AI Battle Cards**
+### **4. Enhanced AI Battle Cards (Confidence-Weighted)**
 - **Primary Entry:** `POST /battle-card`
 - **Handler:** `src/handlers/battle_card.py`
-- **Core Logic:** GPT-4 analysis with discovered URLs and social media data
-- **Database:** Enhanced `BattleCard` model with richer context
+- **Core Logic:** Confidence-weighted analysis with reliability indicators
+- **Database:** Enhanced `BattleCard` model with confidence context
 
-### **6. Database Management (Enhanced)**
+### **5. Competitor Management (Confidence Integration)**
+- **Primary Entry:** `GET/POST/PUT/DELETE /competitors`
+- **Handler:** `src/handlers/competitor_management.py`
+- **Core Logic:** CRUD operations with confidence validation status tracking
+- **Database:** Enhanced `Competitor` model with confidence metadata
+
+### **6. Database Management (Enhanced Schema)**
 - **Primary Entry:** Direct Lambda invocation
 - **Handler:** `src/handlers/migrations.py`
-- **Core Logic:** Schema creation with new tables and data migration
-- **Database:** All enhanced models in `src/models.py`
+- **Core Logic:** Schema creation with confidence validation tables
+- **Database:** All enhanced models with confidence tracking
 
 ---
 
 ## 🔄 Enhanced Data Flow Diagrams
 
-### **URL Discovery Flow**
+### **🆕 Optimized URL Discovery Flow with Confidence Validation**
 ```
-API Request → Lambda → LangChain Service → DuckDuckGo Search → AI Analysis → Database Storage
-     ↓         ↓            ↓                    ↓               ↓              ↓
-User Trigger  Validate   Search Web        Parse Results   Categorize     Store URLs
-             Request     + Sitemap           + Score       + Confidence   + Metadata
-```
-
-### **Social Media Flow**
-```
-API Request → Lambda → Social Media Service → Platform APIs → Data Processing → Database Storage
-     ↓         ↓              ↓                    ↓              ↓               ↓
-User Trigger  Route      Parallel Fetch       API Responses   Standardize    Historical
-             Platform    (Twitter, LinkedIn)   + Rate Limits   Format         Tracking
+API Request → Lambda → Brand Validation → Search Engines → LLM Ranking → LLM Selection → Confidence Filter → Database
+     ↓         ↓            ↓                ↓              ↓              ↓               ↓              ↓
+User Trigger  Validate   AI Validates    Implicit       Rank Top 10    Select Best    Filter Low     Store with
+             Request    Brand Known     Categorization   with Conf.    with Conf.    Confidence    Confidence
 ```
 
-### **Enhanced Scraping Flow**
+### **🆕 Confidence Validation Flow**
 ```
-Trigger → URL Selection → Scraper Factory → Content Extraction → Enhanced Storage
-   ↓           ↓              ↓                  ↓                  ↓
-Schedule    Category        Auto-detect       Category-aware    Metadata +
-Event       Filter         Best Scraper      Parsing Logic     Source URLs
+Company Input → Brand Recognition → Domain Validation → URL Ranking → URL Selection → Multi-Layer Score → Result
+     ↓                ↓                    ↓               ↓             ↓               ↓               ↓
+Company Name    AI Validates        Ensure Domains    LLM Ranks     LLM Selects    Combine All    Pass/Filter
++ Website       Well-Known          Belong to Co.     Relevance     Best URL       Confidence     Based on
+                                                                                   Scores         Threshold
+```
+
+### **Enhanced Scraping Flow (Confidence-Aware)**
+```
+Trigger → Confidence Filter → URL Prioritization → Scraper Selection → Content Extraction → Enhanced Storage
+   ↓           ↓                     ↓                    ↓                  ↓                  ↓
+Schedule    Filter by           Prioritize High      Auto-detect       Confidence-aware    Metadata +
+Event       Confidence          Confidence URLs      Best Scraper      Parsing Logic       Confidence
+            Threshold                                                                       Context
 ```
 
 ---
 
 ## 🔌 Enhanced Integration Points
 
-### **External APIs**
+### **🆕 AI APIs (Optimized Strategy)**
 - **Cohere Command-R**: `https://api.cohere.ai/v1/`
-  - Used in: `src/services/url_discovery.py`, `src/handlers/battle_card.py`
-  - Purpose: Primary AI for URL categorization and competitive analysis
+  - Used in: Primary AI for all URL discovery operations
+  - Purpose: Cost-effective AI for ranking and selection with confidence scoring
 
 - **OpenAI GPT-4**: `https://api.openai.com/v1/`
-  - Used in: `src/services/url_discovery.py`, `src/handlers/battle_card.py`
-  - Purpose: Fallback AI when Cohere unavailable, premium quality analysis
+  - Used in: Fallback AI when Cohere unavailable or for premium quality needs
+  - Purpose: High-quality analysis for critical confidence validation
 
+### **🆕 Search APIs (Enhanced)**
 - **Google Custom Search API**: `https://www.googleapis.com/customsearch/v1`
-  - Used in: `src/services/url_discovery.py`
-  - Purpose: High-quality web search for URL discovery (100 free/day)
+  - Used in: High-quality web search for URL discovery (100 free/day)
+  - Purpose: Reliable search results for confidence validation
 
 - **Brave Search API**: `https://api.search.brave.com/res/v1/web/search`
-  - Used in: `src/services/url_discovery.py`
-  - Purpose: Independent web search for URL discovery (2,000 free/month)
-
-- **Social Media APIs**:
-  - **Twitter API v2**: Official API for follower and engagement metrics
-  - **LinkedIn**: Unofficial API for company data
-  - **Instagram**: Business account metrics
-  - **TikTok**: Video performance data
-
-- **ScrapingBee**: `https://app.scrapingbee.com/api/v1/`
-  - Used in: `src/handlers/scrape_competitor.py`
-  - Purpose: Premium web scraping with anti-bot features
+  - Used in: Independent web search for URL discovery (2,000 free/month)
+  - Purpose: Alternative search backend for improved reliability
 
 ### **Enhanced AWS Services**
-- **API Gateway**: Enhanced with new URL discovery and social media endpoints
-- **Lambda**: Additional functions for URL discovery and social media
-- **RDS PostgreSQL**: Enhanced schema with new tables
-- **CloudWatch**: Enhanced logging and scheduled events
+- **API Gateway**: Enhanced with confidence validation parameters
+- **Lambda**: Optimized functions with confidence validation logic
+- **RDS PostgreSQL**: Enhanced schema with confidence tracking tables
+- **CloudWatch**: Enhanced logging with confidence validation metrics
 
 ---
 
 ## 🛠️ Enhanced Development Workflow
 
-### **Adding New Features**
-1. **Define Enhanced Models**: Update `src/models.py` with new tables/relationships
-2. **Create Services**: Add business logic to `src/services/`
-3. **Create/Update Handlers**: Add/modify files in `src/handlers/`
-4. **Update Template**: Add Lambda functions and API routes to `template.yaml`
-5. **Add Tests**: Extend testing scripts
-6. **Deploy**: Use `scripts/deploy.sh`
+### **Adding New Confidence Validation Features**
+1. **Define Confidence Models**: Update `src/models.py` with confidence tracking fields
+2. **Implement Validation Logic**: Add validation methods to `src/services/url_discovery.py`
+3. **Update Handlers**: Modify handlers to use confidence validation
+4. **Enhance Database**: Add confidence tracking tables and indexes
+5. **Add Tests**: Create confidence validation tests
+6. **Deploy**: Use enhanced deployment scripts
 
-### **Testing New Features**
-1. **URL Discovery**: Run `python scripts/test_url_discovery.py`
-2. **Social Media**: Test individual platform integrations
-3. **Enhanced Scraping**: Test category-aware scraping
-4. **Integration**: Run full workflow tests
+### **Testing Confidence Validation**
+1. **Brand Recognition**: Test with different company types (well-known, emerging, unknown)
+2. **Threshold Testing**: Test different confidence thresholds (0.3, 0.6, 0.8)
+3. **LLM Combinations**: Test different AI model combinations
+4. **Integration Testing**: Test end-to-end confidence validation workflow
 
 ---
 
 ## 📊 Enhanced Monitoring & Observability
 
-### **New Log Sources**
-- **URL Discovery Service**: LangChain and AI-powered search logs
-- **Social Media Service**: Platform API interaction and rate limit logs
-- **Enhanced Scraping**: Category-aware scraping and URL metadata logs
+### **🆕 Confidence Validation Logs**
+- **Brand Recognition**: AI validation of company recognition
+- **Multi-Layer Confidence**: Combined confidence scoring logs
+- **Threshold Filtering**: URLs filtered due to low confidence
+- **Graceful Degradation**: Empty results for unknown companies
 
-### **New Health Checks**
-- **URL Discovery Status**: Monitor discovery job progress and success rates
-- **Social Media APIs**: Track API rate limits and authentication status
-- **Enhanced Database**: Verify new table integrity and relationships
+### **🆕 Enhanced Health Checks**
+- **Confidence Validation Status**: Monitor validation effectiveness
+- **Threshold Performance**: Track optimal confidence thresholds
+- **AI Fallback Performance**: Monitor Cohere → OpenAI fallback success rates
+- **Brand Recognition Accuracy**: Track brand validation accuracy
 
-### **New Performance Metrics**
-- **URL Discovery Time**: Time to discover and categorize URLs with Cohere-first AI
-- **AI Fallback Performance**: Response time and success rate of Cohere → OpenAI fallback
-- **Social Media Fetch Speed**: Multi-platform data retrieval performance
-- **Enhanced Scraping Efficiency**: Category-specific scraping performance
+### **🆕 Confidence Validation Metrics**
+- **Discovery Success Rate**: URLs discovered vs. filtered by confidence
+- **Brand Recognition Rate**: Companies recognized vs. unknown
+- **Confidence Distribution**: Distribution of confidence scores
+- **Threshold Effectiveness**: Optimal thresholds for different use cases
+
+### **🆕 Enhanced Database Queries for Monitoring**
+```sql
+-- Check confidence validation effectiveness
+SELECT 
+  COUNT(*) as total_discoveries,
+  COUNT(CASE WHEN confidence_score >= 0.6 THEN 1 END) as high_confidence,
+  COUNT(CASE WHEN confidence_score < 0.6 THEN 1 END) as filtered_out,
+  AVG(confidence_score) as avg_confidence
+FROM competitor_urls;
+
+-- Monitor brand recognition success
+SELECT 
+  COUNT(*) as total_companies,
+  COUNT(CASE WHEN brand_recognition_confidence >= 0.6 THEN 1 END) as recognized,
+  AVG(brand_recognition_confidence) as avg_brand_confidence
+FROM competitors;
+
+-- Track confidence threshold effectiveness
+SELECT 
+  threshold_used,
+  COUNT(*) as discoveries,
+  AVG(confidence_score) as avg_confidence
+FROM competitor_urls 
+GROUP BY threshold_used;
+```
 
 ---
 
-This enhanced documentation provides a complete technical overview of the system with all new URL discovery and social media features integrated. The architecture now supports intelligent competitor analysis with automated URL discovery, comprehensive social media tracking, and Cohere-first AI-powered insights with robust fallback mechanisms.
+## 🔬 Enhanced Testing Strategy
 
-## 🔬 Testing Strategy
+### **🆕 Confidence Validation Testing**
+The system now includes comprehensive confidence validation testing:
 
-### **Cohere-First AI Testing**
-The system now prioritizes Cohere for AI operations with comprehensive fallback testing:
+- **Multi-Company Testing**: Test with well-known companies, emerging startups, and unknown brands
+- **Threshold Optimization**: Test different confidence thresholds to find optimal settings
+- **AI Model Comparison**: Compare confidence scores between Cohere and OpenAI
+- **Graceful Degradation**: Verify system returns empty results for unreliable companies
+- **Performance Impact**: Measure confidence validation impact on response times
 
-- **Primary Testing**: `test_url_discovery_simple.py` with modular test selection
-- **Fallback Validation**: Automatic testing of Cohere → OpenAI → Pattern Matching chain
-- **Performance Metrics**: Response time comparison between AI providers
-- **Error Handling**: Quota detection and immediate fallback switching
-- **Cost Optimization**: Cohere free tier utilization with premium fallback
-
-### **Test Configuration Examples**
+### **🆕 Test Configuration Examples**
 ```python
-# Quick development testing (Cohere-first)
-TESTS_TO_RUN = ["test_configuration_status", "test_cohere_primary_discovery"]
+# Confidence validation test
+CONFIDENCE_VALIDATION_TESTS = {
+    "well_known_companies": [
+        ("Notion", "https://notion.so", 0.8),
+        ("Slack", "https://slack.com", 0.8),
+        ("Airtable", "https://airtable.com", 0.8)
+    ],
+    "emerging_startups": [
+        ("Cursor", "https://cursor.com", 0.6),
+        ("Linear", "https://linear.app", 0.6),
+        ("Supabase", "https://supabase.com", 0.6)
+    ],
+    "unknown_companies": [
+        ("FakeStartupXYZ", "https://fakestartupxyz.com", 0.0),
+        ("NonExistentCorp", "https://nonexistentcorp.com", 0.0)
+    ]
+}
 
-# AI performance comparison
-TESTS_TO_RUN = ["test_configuration_status", "test_performance_comparison"]
-
-# Search backend validation
-TESTS_TO_RUN = ["test_configuration_status", "test_search_backends_only"]
+# Threshold testing
+CONFIDENCE_THRESHOLDS = [0.3, 0.6, 0.8]  # Permissive, Balanced, Conservative
 ```
 
-The enhanced testing framework ensures reliable operation across different AI providers while optimizing for cost and performance. 
+---
+
+This enhanced documentation provides a complete technical overview of the system with the new optimized URL discovery workflow and confidence validation features. The architecture now provides reliable competitive intelligence while protecting against wrong results for lesser-known companies through multi-layer confidence validation and graceful degradation.
+
+## 🎯 Key Benefits of Enhanced Architecture
+
+### **🛡️ Confidence Validation Benefits**
+- **Prevents Wrong Results**: Multi-layer validation filters unreliable data for unknown companies
+- **Transparent Quality**: Users see confidence scores and understand data reliability
+- **Configurable Precision**: Adjust confidence thresholds based on use case requirements
+- **Cost Optimization**: Avoid expensive API calls on companies unlikely to yield reliable results
+
+### **⚡ Optimized Performance Benefits**
+- **Simplified Workflow**: 3-step process (Search → Rank → Select) vs. complex batching
+- **Flexible AI Selection**: Choose different models for different steps to optimize cost/quality
+- **Reduced API Calls**: Confidence validation prevents unnecessary processing
+- **Faster Response Times**: Streamlined workflow with early filtering
+
+### **🎯 Business Value Benefits**
+- **Reliable Competitive Intelligence**: High-confidence results users can trust
+- **Scalable Architecture**: Works for both well-known companies and emerging startups
+- **Cost-Effective**: Optimized AI usage with smart fallbacks
+- **User-Friendly**: Clear confidence indicators help users make informed decisions
+
+The enhanced system now provides enterprise-grade competitive intelligence with built-in quality assurance and cost optimization. 

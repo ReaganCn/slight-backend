@@ -6,8 +6,9 @@ A **serverless Python backend** for tracking competitor pricing and generating A
 
 - **🕷️ Flexible Web Scraping**: Choose between Playwright (FREE) or ScrapingBee (PAID)
 - **🤖 AI Battle Cards**: GPT-4 powered competitive analysis and positioning
-- **🔍 Intelligent URL Discovery**: LangChain-powered automatic discovery of competitor pages (NEW)
-- **📱 Social Media Integration**: Automated tracking of LinkedIn, Twitter, Instagram, TikTok (NEW)
+- **🔍 Intelligent URL Discovery**: Optimized workflow with confidence validation (NEW)
+- **🛡️ Confidence Validation**: Prevents wrong results for lesser-known companies (NEW)
+- **📱 Social Media Integration**: Automated tracking of LinkedIn, Twitter, Instagram, TikTok
 - **⚡ Serverless Architecture**: AWS Lambda + RDS PostgreSQL for scalability
 - **🔄 Automated Scheduling**: Regular competitor monitoring every 6 hours
 - **📊 Historical Tracking**: Store and analyze pricing trends over time
@@ -25,38 +26,68 @@ A **serverless Python backend** for tracking competitor pricing and generating A
          └──────────────│  External APIs  │──────────────┘
                         │ • ScrapingBee   │
                         │ • OpenAI GPT-4  │
+                        │ • Cohere AI     │
                         │ • Social Media  │
-                        │ • LangChain     │
+                        │ • Search APIs   │
                         └─────────────────┘
 ```
 
-## 🆕 NEW: Intelligent URL Discovery & Social Media
+## 🆕 NEW: Optimized URL Discovery with Confidence Validation
 
-### **Automated Competitor Page Discovery**
-The system intelligently discovers competitor pages using LangChain with reliable search APIs:
-- **Pricing pages**: Automatically find subscription and pricing information
-- **Feature pages**: Discover product capabilities and feature comparisons
-- **Blog pages**: Locate content marketing and thought leadership
-- **Social media**: Find LinkedIn, Twitter, Instagram, and TikTok profiles
+### **Simplified Workflow: Search → LLM Rank → LLM Select**
+The system now uses a streamlined 3-step process that's more efficient and reliable:
 
-### **Robust AI Fallback System**
-Enhanced error handling ensures continuous operation even with API failures:
-- **Cohere Primary**: Fast, reliable, and cost-effective AI categorization
-- **OpenAI Fallback**: Premium quality GPT-4 when Cohere unavailable
-- **Pattern Matching**: Final fallback ensures system never fails
-- **Smart Error Detection**: Detects quota limits, rate limits, and API failures
-- **Optimized Performance**: Faster failure detection and immediate fallback switching
+1. **🔍 Search Engines Do Implicit Categorization**
+   - Search "Company pricing" → pricing URLs
+   - Search "Company features" → features URLs  
+   - Search "Company blog" → blog URLs
 
-### **Smart Confirmation Workflow**
-- URLs discovered with confidence scores
-- User review and confirmation interface
-- Automatic categorization and validation
+2. **🤖 LLM Ranks Top 10 Most Relevant URLs**
+   - Analyzes URL paths, titles, descriptions
+   - Returns URLs ordered by relevance with confidence scores
 
-### **Enhanced Social Media Tracking**
-- **LinkedIn**: Company followers, employee count, recent posts
-- **Twitter/X**: Follower metrics, engagement rates, recent tweets
-- **Instagram**: Business account metrics, post engagement
-- **TikTok**: Video performance, follower growth
+3. **🎯 LLM Selects Single Best URL**
+   - Chooses most valuable for competitive analysis
+   - Returns final URL per category with confidence validation
+
+### **🛡️ Confidence Validation System**
+**Problem Solved**: Prevents wrong results for lesser-known companies and startups.
+
+**Multi-Layer Validation**:
+- **Brand Recognition**: AI validates if company is well-known enough for reliable results
+- **Domain Validation**: Ensures discovered domains actually belong to the company
+- **URL Confidence**: LLM can declare "NO_RELEVANT_URLS" if none are suitable
+- **Configurable Thresholds**: Adjust precision based on use case
+
+```python
+# Conservative (high confidence required)
+min_confidence_threshold = 0.8  # Only very confident results
+
+# Balanced (recommended)
+min_confidence_threshold = 0.6  # Good balance of coverage and accuracy
+
+# Permissive (exploratory research)
+min_confidence_threshold = 0.3  # More results, potentially less reliable
+```
+
+**Expected Behavior by Company Type**:
+- **🏢 Well-Known Companies** (Notion, Slack): Pass all thresholds (0.8+ confidence)
+- **🚀 Emerging Startups** (Cursor, Linear): Pass lower/medium thresholds (0.6-0.8)
+- **❓ Unknown/Fictional Companies**: Fail validation entirely (return empty results)
+
+### **🤖 Flexible LLM Selection**
+Choose different AI models for each step to optimize cost and quality:
+
+```python
+# Cost-effective
+ranking_llm="cohere", selection_llm="cohere"
+
+# Hybrid approach  
+ranking_llm="cohere", selection_llm="openai"
+
+# Premium quality
+ranking_llm="openai", selection_llm="openai"
+```
 
 ## 🕷️ Flexible Scraping Options
 
@@ -77,7 +108,7 @@ Enhanced error handling ensures continuous operation even with API failures:
 - AWS CLI configured
 - Docker installed
 - Python 3.9+
-- OpenAI API key
+- OpenAI API key or Cohere API key
 
 ### 1. Clone & Setup
 ```bash
@@ -99,7 +130,7 @@ playwright install chromium
 # Run tests
 python ../scripts/test_local.py
 
-# Test URL discovery (NEW)
+# Test optimized URL discovery with confidence validation
 python ../scripts/test_url_discovery.py
 ```
 
@@ -113,6 +144,7 @@ python ../scripts/test_url_discovery.py
   --stack-name "competitor-tracking" \
   --region "us-east-1" \
   --db-password "YourPassword123!" \
+  --cohere-key "your-cohere-key" \
   --openai-key "sk-your-key"
 ```
 
@@ -128,16 +160,16 @@ python ../scripts/test_url_discovery.py
 | `POST` | `/scrape` | Trigger scraping |
 | `POST` | `/battle-card` | Generate AI analysis |
 
-### **🆕 NEW: URL Discovery Endpoints**
+### **🆕 Optimized URL Discovery Endpoints**
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/competitors/{id}/discover-urls` | Trigger intelligent URL discovery |
-| `GET` | `/competitors/{id}/urls` | List discovered URLs |
+| `POST` | `/competitors/{id}/discover-urls` | Trigger optimized URL discovery with confidence validation |
+| `GET` | `/competitors/{id}/urls` | List discovered URLs with confidence scores |
 | `PUT` | `/competitors/{id}/urls` | Confirm/reject discovered URLs |
 | `POST` | `/competitors/{id}/scrape-all` | Scrape all confirmed URLs |
 | `POST` | `/competitors/{id}/scrape-category` | Scrape specific URL category |
 
-### **🆕 NEW: Social Media Endpoints**
+### **Social Media Endpoints**
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/competitors/{id}/social-media` | Get social media data |
@@ -155,19 +187,21 @@ PREFERRED_SCRAPER="playwright"     # Free option
 PREFERRED_SCRAPER="scrapingbee"    # Paid option  
 PREFERRED_SCRAPER="auto"           # Smart detection
 
-# API Keys
-COHERE_API_KEY="your-cohere-key"   # Primary AI for URL categorization
-OPENAI_API_KEY="sk-your-key"       # Fallback AI when Cohere unavailable
+# 🆕 AI APIs (Cohere-first strategy with OpenAI fallback)
+COHERE_API_KEY="your-cohere-key"   # Primary AI for URL discovery (cost-effective)
+OPENAI_API_KEY="sk-your-key"       # Fallback AI for premium quality when needed
 SCRAPINGBEE_API_KEY="your-key"     # Optional
 
-# 🆕 NEW: Reliable Search APIs for URL Discovery
+# 🆕 Enhanced Search APIs for Reliable URL Discovery
 GOOGLE_CSE_API_KEY="your-google-cse-api-key"     # Google Custom Search (100 free/day)
 GOOGLE_CSE_ID="your-google-cse-id"               # Custom Search Engine ID
 BRAVE_API_KEY="your-brave-api-key"               # Brave Search (2000 free/month)
-LANGCHAIN_SEARCH_RESULTS_LIMIT="10"              # Search result limit
-URL_DISCOVERY_CONFIDENCE_THRESHOLD="0.7"         # Confidence threshold
 
-# 🆕 NEW: Social Media APIs
+# 🆕 Confidence Validation Settings
+URL_DISCOVERY_CONFIDENCE_THRESHOLD="0.6"         # Default confidence threshold
+LANGCHAIN_SEARCH_RESULTS_LIMIT="10"              # Search result limit
+
+# Social Media APIs
 TWITTER_BEARER_TOKEN="your_twitter_bearer_token"
 LINKEDIN_EMAIL="your_linkedin_email"             # For unofficial API
 LINKEDIN_PASSWORD="your_linkedin_password"       # For unofficial API
@@ -178,153 +212,133 @@ TIKTOK_ACCESS_TOKEN="your_tiktok_access_token"
 
 ## 📊 Usage Examples
 
-### **🆕 Enhanced Workflow with Reliable URL Discovery**
+### **🆕 Optimized Workflow with Confidence Validation**
 
 ```javascript
 // 1. Create competitor
 POST /competitors
 {
-  "name": "Competitor Inc",
-  "website": "https://competitor.com",
-  "description": "AI-powered SaaS competitor"
+  "name": "Emerging Startup",
+  "website": "https://startup.com",
+  "description": "AI-powered tool for developers"
 }
 
-// 2. Discover URLs using Google Custom Search & Brave Search
+// 2. Discover URLs with confidence validation
 POST /competitors/{id}/discover-urls
-// Returns: categorized URLs with confidence scores from reliable sources
-
-// 3. User confirms URLs
-PUT /competitors/{id}/urls
 {
-  "confirmations": [
-    {"url_id": "uuid1", "status": "confirmed"},
-    {"url_id": "uuid2", "status": "rejected"}
+  "search_depth": "standard",
+  "categories": ["pricing", "features", "blog"],
+  "ranking_llm": "cohere",
+  "selection_llm": "cohere", 
+  "min_confidence_threshold": 0.6  // Balanced approach
+}
+
+// Response includes confidence scores:
+{
+  "discovered_urls": [
+    {
+      "url": "https://startup.com/pricing",
+      "category": "pricing",
+      "confidence_score": 0.85,
+      "brand_confidence": 0.80,
+      "ranking_confidence": 0.90,
+      "selection_confidence": 0.85
+    }
   ]
 }
 
-// 4. Trigger comprehensive data collection
-POST /competitors/{id}/scrape-all
-// Scrapes all confirmed URLs + fetches social media data
-
-// 5. Get complete competitive intelligence
-GET /competitors/{id}
-// Returns: enhanced competitor data with discovered information
+// 3. System automatically filters out low-confidence results
+// Better to return no data than wrong data for unknown companies
 ```
 
-### Scraping with Auto-Detection
-```python
-from handlers.scrape_competitor import EnhancedCompetitorScraper
+### **🛡️ Confidence Validation Examples**
 
-# Automatically chooses best available scraper
-async with EnhancedCompetitorScraper() as scraper:
-    # Scrape all confirmed URLs
-    result = await scraper.scrape_all_competitor_urls(competitor_id)
-    
-    # Or scrape specific category
-    result = await scraper.scrape_by_category(competitor_id, "pricing")
+```python
+# Well-known company (high confidence)
+urls = await discover_urls("Notion", threshold=0.8)  # ✅ Returns results
+
+# Emerging startup (medium confidence)  
+urls = await discover_urls("Cursor", threshold=0.6)  # ✅ Returns results
+urls = await discover_urls("Cursor", threshold=0.8)  # ⚠️ May filter some results
+
+# Unknown company (low confidence)
+urls = await discover_urls("FakeStartup", threshold=0.6)  # ❌ Returns empty (protected)
 ```
 
-### **🆕 Reliable URL Discovery with Cohere-First AI**
-```python
-from services.url_discovery import URLDiscoveryService
+### **🤖 LLM Selection Optimization**
 
-# Initialize with Cohere-first AI strategy
-discovery_service = URLDiscoveryService(
-    cohere_api_key="your-cohere-key",      # Primary AI
-    openai_api_key="sk-...",               # Fallback AI
-    google_cse_api_key="your-google-key",
-    google_cse_id="your-cse-id",
-    brave_api_key="your-brave-key"
+```python
+# Cost-effective approach
+discovered_urls = await service.discover_competitor_urls(
+    competitor_name="Company",
+    ranking_llm="cohere",      # Fast and cheap for ranking
+    selection_llm="cohere",    # Consistent quality
+    min_confidence_threshold=0.6
 )
-discovered_urls = await discovery_service.discover_competitor_urls(
-    "Competitor Name",
-    "https://competitor.com"
+
+# Premium quality approach  
+discovered_urls = await service.discover_competitor_urls(
+    competitor_name="Company", 
+    ranking_llm="openai",      # Premium ranking
+    selection_llm="openai",    # Premium selection
+    min_confidence_threshold=0.7
 )
-```
-
-### **🆕 Social Media Integration**
-```python
-from services.social_media import SocialMediaFetcher
-
-social_fetcher = SocialMediaFetcher(config={
-    'TWITTER_BEARER_TOKEN': 'your_token',
-    'LINKEDIN_EMAIL': 'your_email'
-})
-
-result = await social_fetcher.fetch_all_platforms(competitor_id, social_urls)
-```
-
-### Force Specific Scraper
-```python
-# Use free Playwright
-async with CompetitorScraper("playwright") as scraper:
-    result = await scraper.scrape_url(url, name)
-
-# Use paid ScrapingBee  
-async with CompetitorScraper("scrapingbee") as scraper:
-    result = await scraper.scrape_url(url, name)
 ```
 
 ## 🧪 Testing
 
 ```bash
-# 🆕 Modular URL discovery testing with Cohere-first
+# 🆕 Test optimized URL discovery with confidence validation
+python scripts/test_url_discovery.py
+
+# 🆕 Test confidence validation specifically
+python scripts/test_confidence_validation.py
+
+# 🆕 Test LLM combinations and confidence thresholds
 python scripts/test_url_discovery_simple.py
 
 # Test all scraping options
 python scripts/test_scraping.py
 
-# Test specific scraper
-PREFERRED_SCRAPER=playwright python scripts/test_scraping.py
-
-# Test comprehensive URL discovery workflow
-python scripts/test_url_discovery.py
-
-# Compare performance
+# Test comprehensive workflow
 python scripts/test_local.py
 ```
 
-### **🔧 Modular Test Configuration**
-The new `test_url_discovery_simple.py` script offers selectable test modules:
-
+### **🔧 Test Configuration Examples**
 ```python
-# ✅ QUICK TEST (Default - Recommended for development)
-TESTS_TO_RUN = [
-    "test_configuration_status",      # Check API keys & service status
-    "test_cohere_primary_discovery",  # Full discovery with Cohere-first
+# Test different confidence levels
+CONFIDENCE_THRESHOLDS = [0.3, 0.6, 0.8]  # Low, Medium, High
+
+# Test different company types
+TEST_COMPANIES = [
+    ("Notion", "https://notion.so", "HIGH_CONFIDENCE"),      # Well-known
+    ("Cursor", "https://cursor.com", "MEDIUM_CONFIDENCE"),   # Startup
+    ("FakeXYZ", "https://fakexyz.com", "LOW_CONFIDENCE")     # Unknown
 ]
-
-# 🧠 AI-ONLY TESTS (Uncomment to test just AI categorization)
-# TESTS_TO_RUN = ["test_configuration_status", "test_ai_categorization_only"]
-
-# 🔍 SEARCH-ONLY TESTS (Uncomment to test just search backends)  
-# TESTS_TO_RUN = ["test_configuration_status", "test_search_backends_only"]
-
-# ⚡ PERFORMANCE COMPARISON (Uncomment to compare AI configurations)
-# TESTS_TO_RUN = ["test_configuration_status", "test_performance_comparison"]
 ```
-
-**Usage**: Simply comment/uncomment the `TESTS_TO_RUN` configuration you want to use.
 
 ## 📁 Project Structure
 
 ```
 ├── src/
 │   ├── handlers/           # Lambda function handlers
-│   │   ├── url_discovery.py      # NEW: URL discovery logic
-│   │   ├── social_media.py       # NEW: Social media integration
+│   │   ├── url_discovery.py      # Optimized URL discovery logic
+│   │   ├── social_media.py       # Social media integration
 │   │   └── scrape_competitor.py  # Enhanced with URL discovery
-│   ├── services/           # NEW: Business logic services
-│   │   ├── url_discovery.py      # LangChain URL discovery
+│   ├── services/           # Business logic services
+│   │   ├── url_discovery.py      # Optimized workflow with confidence validation
 │   │   └── social_media.py       # Social media APIs
 │   ├── scrapers/           # Flexible scraping implementations
 │   ├── models.py           # Enhanced database models
 │   ├── database.py         # Database connections
 │   └── requirements.txt    # Updated Python dependencies
 ├── scripts/                # Deployment and testing scripts
-│   └── test_url_discovery.py     # NEW: Comprehensive test suite
+│   ├── test_url_discovery.py         # Comprehensive test suite
+│   ├── test_confidence_validation.py # Confidence validation tests
+│   └── test_url_discovery_simple.py  # LLM combination tests
 ├── template.yaml           # AWS SAM template
 ├── docker-compose.yml      # Local development
+├── CONFIDENCE_VALIDATION.md # 🆕 Confidence validation documentation
 ├── DOCUMENTATION.md        # Technical documentation
 └── RUN.md                  # Setup and deployment guide
 ```
@@ -333,33 +347,41 @@ TESTS_TO_RUN = [
 
 ### Free Tier (Playwright + Cohere)
 - **Scraping**: $0
-- **URL Discovery**: ~$0-2/month (Cohere free tier)
+- **URL Discovery**: ~$0-2/month (Cohere free tier + confidence validation)
 - **Lambda**: ~$1-5/month (depends on usage)
 - **RDS**: ~$13/month (db.t3.micro)
 - **Total**: ~$14-20/month
 
-### Premium Tier (ScrapingBee + Social APIs)
+### Premium Tier (ScrapingBee + OpenAI)
 - **Scraping**: $29-199/month
 - **URL Discovery**: ~$2-5/month (Cohere + OpenAI fallback)
 - **Social Media APIs**: $0-50/month (varies by platform)
-- **Lambda**: ~$1-3/month (lower memory usage)
+- **Lambda**: ~$1-3/month (optimized workflow)
 - **RDS**: ~$13/month
 - **Total**: ~$45-270/month
+
+### **🆕 Hybrid Tier (Recommended)**
+- **Scraping**: Playwright (free) with ScrapingBee fallback
+- **URL Discovery**: Cohere-first with OpenAI for critical selections
+- **Confidence Validation**: Prevents wasted API calls on unknown companies
+- **Total**: ~$20-70/month (optimal cost/performance)
 
 ## 🔍 Monitoring & Logs
 
 ```bash
 # View Lambda logs
-sam logs -n ScrapeCompetitorFunction --tail
+sam logs -n URLDiscoveryFunction --tail
 
-# Check database
-docker exec -it postgres psql -U postgres -d competitordb
+# Check confidence validation metrics
+# SELECT category, AVG(confidence_score), COUNT(*) 
+# FROM competitor_urls 
+# WHERE confidence_score >= 0.6
+# GROUP BY category;
 
-# Monitor URL discovery jobs
-# SELECT * FROM competitor_urls ORDER BY discovered_at DESC;
-
-# Monitor social media data
-# SELECT * FROM social_media_data ORDER BY fetched_at DESC;
+# Monitor filtered results (protected from wrong data)
+# SELECT COUNT(*) as filtered_results
+# FROM discovery_logs 
+# WHERE status = 'filtered_low_confidence';
 ```
 
 ## 🔐 Security Features
@@ -369,31 +391,31 @@ docker exec -it postgres psql -U postgres -d competitordb
 - **API Key Management**: Secure environment variables
 - **Input Validation**: Sanitized database operations
 - **Multi-tenant**: User-isolated data access
-- **Rate Limiting**: Respectful social media API usage
+- **Confidence Validation**: Prevents data pollution from unreliable sources
 
 ## 🆕 New Feature Highlights
 
-### **Intelligent URL Discovery**
-- **LangChain Integration**: AI-powered web search and analysis
-- **Confidence Scoring**: ML-based relevance assessment
-- **Sitemap Analysis**: Automated sitemap parsing
-- **User Confirmation**: Review workflow for discovered URLs
+### **Optimized URL Discovery Workflow**
+- **3-Step Process**: Search → LLM Rank → LLM Select (simplified from complex batching)
+- **Implicit Categorization**: Search engines handle categorization naturally
+- **Flexible LLM Selection**: Choose different models for ranking vs selection
+- **Performance Optimized**: Reduced API calls and faster processing
 
-### **Social Media Intelligence**
-- **Multi-Platform Support**: LinkedIn, Twitter, Instagram, TikTok
-- **Engagement Metrics**: Detailed performance analytics
-- **Historical Tracking**: Monitor follower growth and engagement trends
-- **Content Analysis**: Recent posts and engagement patterns
+### **Confidence Validation System**
+- **Brand Recognition**: AI validates if company is well-known enough
+- **Multi-Layer Confidence**: Brand, ranking, and selection confidence scores
+- **Configurable Thresholds**: Adjust precision based on use case
+- **Graceful Degradation**: Clear feedback when results are filtered
 
-### **Enhanced Scraping**
-- **URL-Category Mapping**: Intelligent categorization of scraped content
-- **Batch Operations**: Scrape multiple URLs efficiently
-- **Enhanced Metadata**: Rich context about scraped data
-- **Error Handling**: Graceful failure recovery
+### **Enhanced Error Handling**
+- **Smart Fallbacks**: Cohere → OpenAI → Pattern matching
+- **Early Filtering**: Avoid expensive searches for unrecognized brands
+- **Transparent Confidence**: Users see why results were filtered
 
 ## 📚 Documentation
 
-- **[DOCUMENTATION.md](DOCUMENTATION.md)**: Complete technical documentation with new features
+- **[CONFIDENCE_VALIDATION.md](CONFIDENCE_VALIDATION.md)**: 🆕 Comprehensive guide to confidence validation
+- **[DOCUMENTATION.md](DOCUMENTATION.md)**: Complete technical documentation
 - **[RUN.md](RUN.md)**: Updated setup and deployment guide
 
 ## 🤝 Contributing
@@ -401,17 +423,18 @@ docker exec -it postgres psql -U postgres -d competitordb
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Test thoroughly (including new URL discovery tests)
+4. Test thoroughly (including confidence validation tests)
 5. Submit a pull request
 
 ## 📞 Support
 
 For questions or issues:
-1. Check the documentation files
-2. Review the testing scripts (including `test_url_discovery.py`)
+1. Check the confidence validation documentation
+2. Review the testing scripts (especially confidence validation tests)
 3. Examine CloudFormation events for deployment issues
 4. Check Lambda logs for runtime errors
 
 ---
 
-**Built with ❤️ for competitive intelligence and business strategy**
+**Built with ❤️ for reliable competitive intelligence**
+**🛡️ Now with confidence validation to prevent wrong results for lesser-known companies**
