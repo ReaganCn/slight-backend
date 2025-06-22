@@ -325,12 +325,14 @@ class URLDiscoveryService:
                                      search_depth: str = "standard", 
                                      categories: List[str] = None,
                                      ranking_llm: str = "cohere",  # LLM for relevance ranking
-                                     selection_llm: str = "cohere") -> List[Dict[str, Any]]:  # LLM for final selection
+                                     selection_llm: str = "cohere",  # LLM for final selection
+                                     min_confidence_threshold: float = 0.6) -> List[Dict[str, Any]]:  # Minimum confidence threshold
         """
-        Simplified URL discovery workflow:
+        Simplified URL discovery workflow with confidence validation:
         1. Search for each category (implicit categorization)
         2. Use LLM to rank top 10 most relevant URLs per category
         3. Use LLM to select single best URL from top 10
+        4. Validate confidence and brand recognition before returning results
         
         Args:
             competitor_name: Name of the competitor
@@ -339,17 +341,29 @@ class URLDiscoveryService:
             categories: List of categories to search for
             ranking_llm: LLM to use for relevance ranking ("cohere", "openai")
             selection_llm: LLM to use for final selection ("cohere", "openai")
+            min_confidence_threshold: Minimum confidence required to return results (0.0-1.0)
         """
         logger.info(f"🔍 Starting simplified URL discovery for {competitor_name}")
         logger.info(f"🏷️ Searching for categories: {categories}")
         logger.info(f"🤖 Using {ranking_llm} for ranking, {selection_llm} for selection")
+        logger.info(f"🎯 Minimum confidence threshold: {min_confidence_threshold}")
         
         if not categories:
             categories = ['pricing', 'features', 'blog']
         
-        # Step 1: Discover official domains
-        logger.info(f"🔍 Step 1: Discovering top 3 official domains for {competitor_name}...")
-        official_domains = await self._discover_brand_domains(competitor_name, base_url)
+        # Step 1: Validate company and discover official domains
+        logger.info(f"🔍 Step 1: Validating company and discovering domains for {competitor_name}...")
+        domain_discovery_result = await self._discover_brand_domains_with_confidence(competitor_name, base_url)
+        
+        if not domain_discovery_result['success']:
+            logger.warning(f"⚠️ Company validation failed: {domain_discovery_result['reason']}")
+            return []  # Return empty results rather than wrong results
+        
+        official_domains = domain_discovery_result['domains']
+        brand_confidence = domain_discovery_result['confidence']
+        
+        logger.info(f"✅ Brand validation successful (confidence: {brand_confidence:.2f})")
+        logger.info(f"🔍 Validated domains: {official_domains}")
         
         # Step 2: Generate targeted searches for each category
         logger.info(f"🔍 Step 2: Generating targeted searches for {len(official_domains)} domains...")
@@ -384,8 +398,8 @@ class URLDiscoveryService:
                         logger.warning(f"⚠️ {tool['name']} failed for '{query}': {e}")
                         continue
         
-        # Step 4: Filter to same-domain URLs and rank by relevance
-        logger.info(f"🔍 Step 4: Filtering and ranking results...")
+        # Step 4: Filter to same-domain URLs and validate relevance
+        logger.info(f"🔍 Step 4: Filtering and validating results...")
         final_results = []
         
         for category, results in category_results.items():
@@ -405,43 +419,267 @@ class URLDiscoveryService:
                 logger.warning(f"⚠️ No same-domain results for category: {category}")
                 continue
             
-            # Step 5: Use LLM to rank top 10 most relevant URLs
+            # Step 5: Use LLM to rank top 10 most relevant URLs with confidence validation
             logger.info(f"🤖 Step 5: Using {ranking_llm} to rank most relevant URLs for {category}...")
-            top_urls = await self._llm_rank_urls_for_category(
+            ranking_result = await self._llm_rank_urls_for_category_with_confidence(
                 same_domain_results, category, competitor_name, ranking_llm, limit=10
             )
             
-            if not top_urls:
-                logger.warning(f"⚠️ No URLs ranked for category: {category}")
+            if not ranking_result['success']:
+                logger.warning(f"⚠️ Ranking failed for {category}: {ranking_result['reason']}")
                 continue
             
-            # Step 6: Use LLM to select single best URL from top 10
+            top_urls = ranking_result['urls']
+            ranking_confidence = ranking_result['confidence']
+            
+            # Step 6: Use LLM to select best URL with confidence validation
             logger.info(f"🤖 Step 6: Using {selection_llm} to select best URL from top {len(top_urls)} for {category}...")
-            best_url = await self._llm_select_best_url(
+            selection_result = await self._llm_select_best_url_with_confidence(
                 top_urls, category, competitor_name, selection_llm
             )
             
-            if best_url:
-                final_results.append({
-                    **best_url,
-                    'category': category,
-                    'confidence_score': 0.9,  # High confidence since it's LLM-selected
-                    'discovery_method': f'{ranking_llm}_ranking + {selection_llm}_selection',
-                    'ranking_llm': ranking_llm,
-                    'selection_llm': selection_llm
-                })
-                logger.info(f"✅ {category.upper()}: Selected {best_url.get('url')}")
-            else:
-                logger.warning(f"⚠️ No URL selected for category: {category}")
+            if not selection_result['success']:
+                logger.warning(f"⚠️ Selection failed for {category}: {selection_result['reason']}")
+                continue
+            
+            best_url = selection_result['url']
+            selection_confidence = selection_result['confidence']
+            
+            # Calculate overall confidence
+            overall_confidence = min(brand_confidence, ranking_confidence, selection_confidence)
+            
+            # Apply confidence threshold
+            if overall_confidence < min_confidence_threshold:
+                logger.warning(f"⚠️ {category}: Overall confidence {overall_confidence:.2f} below threshold {min_confidence_threshold}")
+                logger.warning(f"   Skipping to avoid potentially incorrect results")
+                continue
+            
+            final_results.append({
+                **best_url,
+                'category': category,
+                'confidence_score': overall_confidence,
+                'discovery_method': f'{ranking_llm}_ranking + {selection_llm}_selection',
+                'ranking_llm': ranking_llm,
+                'selection_llm': selection_llm,
+                'brand_confidence': brand_confidence,
+                'ranking_confidence': ranking_confidence,
+                'selection_confidence': selection_confidence
+            })
+            logger.info(f"✅ {category.upper()}: Selected {best_url.get('url')} (confidence: {overall_confidence:.2f})")
         
         logger.info(f"🎯 Discovery complete: {len(final_results)} URLs found across {len(categories)} categories")
+        
+        if len(final_results) == 0:
+            logger.warning(f"⚠️ No URLs met confidence threshold {min_confidence_threshold}")
+            logger.warning(f"   This may indicate the company is not well-known or search results are unreliable")
+        
         return final_results
 
-    async def _llm_rank_urls_for_category(self, urls: List[Dict[str, Any]], category: str, 
-                                        competitor_name: str, llm_choice: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """Use LLM to rank URLs by relevance for a specific category."""
+    async def _discover_brand_domains_with_confidence(self, competitor_name: str, base_url: str) -> Dict[str, Any]:
+        """Discover brand domains with confidence validation."""
+        try:
+            # First validate the company exists and is recognizable
+            validation_result = await self._validate_brand_recognition(competitor_name, base_url)
+            
+            if not validation_result['is_recognized']:
+                return {
+                    'success': False,
+                    'reason': f"Brand not well-recognized: {validation_result['reason']}",
+                    'confidence': validation_result['confidence']
+                }
+            
+            # Proceed with domain discovery
+            domains = await self._discover_brand_domains(competitor_name, base_url)
+            
+            # Validate discovered domains
+            domain_validation = await self._validate_discovered_domains(domains, competitor_name, base_url)
+            
+            return {
+                'success': domain_validation['valid'],
+                'domains': domains if domain_validation['valid'] else [],
+                'confidence': min(validation_result['confidence'], domain_validation['confidence']),
+                'reason': domain_validation.get('reason', 'Success')
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Brand domain discovery failed: {e}")
+            return {
+                'success': False,
+                'reason': f"Discovery error: {str(e)}",
+                'confidence': 0.0
+            }
+
+    async def _validate_brand_recognition(self, competitor_name: str, base_url: str) -> Dict[str, Any]:
+        """Validate if the brand is well-recognized to avoid wrong results."""
+        prompt = f"""
+        Evaluate if "{competitor_name}" is a well-known, legitimate company or brand.
+        
+        Website: {base_url}
+        
+        Consider:
+        - Is this a real company/product that exists?
+        - Is it well-known enough to have reliable search results?
+        - Would search engines return accurate information about this brand?
+        - Is the website domain consistent with the company name?
+        
+        Respond with:
+        RECOGNIZED: [YES/NO]
+        CONFIDENCE: [0.0-1.0]
+        REASON: [Brief explanation]
+        
+        Example responses:
+        RECOGNIZED: YES
+        CONFIDENCE: 0.9
+        REASON: Well-known productivity software company
+        
+        RECOGNIZED: NO
+        CONFIDENCE: 0.2
+        REASON: Unknown company name, may be startup or fictional
+        """
+        
+        try:
+            if hasattr(self, 'cohere_client') and self.cohere_client:
+                response_text = await self._cohere_query(prompt)
+            else:
+                response_text = await self._openai_query(prompt)
+            
+            # Parse response
+            lines = response_text.strip().split('\n')
+            recognized = False
+            confidence = 0.0
+            reason = "Unknown"
+            
+            for line in lines:
+                line = line.strip()
+                if line.startswith('RECOGNIZED:'):
+                    recognized = 'YES' in line.upper()
+                elif line.startswith('CONFIDENCE:'):
+                    try:
+                        confidence = float(line.split(':')[1].strip())
+                    except:
+                        confidence = 0.5
+                elif line.startswith('REASON:'):
+                    reason = line.split(':', 1)[1].strip()
+            
+            return {
+                'is_recognized': recognized,
+                'confidence': confidence,
+                'reason': reason
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Brand recognition validation failed: {e}")
+            return {
+                'is_recognized': False,
+                'confidence': 0.0,
+                'reason': f"Validation error: {str(e)}"
+            }
+
+    async def _validate_discovered_domains(self, domains: List[str], competitor_name: str, base_url: str) -> Dict[str, Any]:
+        """Validate that discovered domains are actually related to the company."""
+        if not domains:
+            return {'valid': False, 'confidence': 0.0, 'reason': 'No domains discovered'}
+        
+        # Check if base domain is in discovered domains
+        base_domain = self._extract_domain(base_url)
+        domain_match = any(self._domains_match(base_domain, domain) for domain in domains)
+        
+        if not domain_match:
+            return {
+                'valid': False, 
+                'confidence': 0.0, 
+                'reason': f'Base domain {base_domain} not found in discovered domains {domains}'
+            }
+        
+        # Additional validation with LLM
+        prompt = f"""
+        Validate if these domains are actually related to "{competitor_name}":
+        
+        Discovered domains: {domains}
+        Expected base domain: {base_domain}
+        
+        Are these domains legitimate and related to the company?
+        
+        Respond with:
+        VALID: [YES/NO]
+        CONFIDENCE: [0.0-1.0]
+        REASON: [Brief explanation]
+        """
+        
+        try:
+            if hasattr(self, 'cohere_client') and self.cohere_client:
+                response_text = await self._cohere_query(prompt)
+            else:
+                response_text = await self._openai_query(prompt)
+            
+            # Parse response
+            lines = response_text.strip().split('\n')
+            valid = True  # Default to valid if we can't parse
+            confidence = 0.8
+            reason = "Domain validation successful"
+            
+            for line in lines:
+                line = line.strip()
+                if line.startswith('VALID:'):
+                    valid = 'YES' in line.upper()
+                elif line.startswith('CONFIDENCE:'):
+                    try:
+                        confidence = float(line.split(':')[1].strip())
+                    except:
+                        confidence = 0.8
+                elif line.startswith('REASON:'):
+                    reason = line.split(':', 1)[1].strip()
+            
+            return {
+                'valid': valid,
+                'confidence': confidence,
+                'reason': reason
+            }
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Domain validation failed, proceeding with basic validation: {e}")
+            return {
+                'valid': domain_match,
+                'confidence': 0.7 if domain_match else 0.0,
+                'reason': "Basic domain matching validation"
+            }
+
+    def _extract_domain(self, url: str) -> str:
+        """Extract domain from URL."""
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            return parsed.netloc.lower()
+        except:
+            return url.lower()
+
+    def _domains_match(self, domain1: str, domain2: str) -> bool:
+        """Check if two domains match (considering subdomains)."""
+        domain1 = domain1.lower().strip()
+        domain2 = domain2.lower().strip()
+        
+        # Direct match
+        if domain1 == domain2:
+            return True
+        
+        # Remove www prefix for comparison
+        domain1_clean = domain1.replace('www.', '')
+        domain2_clean = domain2.replace('www.', '')
+        
+        if domain1_clean == domain2_clean:
+            return True
+        
+        # Check if one is a subdomain of the other
+        if domain1_clean.endswith('.' + domain2_clean) or domain2_clean.endswith('.' + domain1_clean):
+            return True
+        
+        return False
+
+    async def _llm_rank_urls_for_category_with_confidence(self, urls: List[Dict[str, Any]], category: str, 
+                                        competitor_name: str, llm_choice: str, limit: int = 10) -> Dict[str, Any]:
+        """Use LLM to rank URLs by relevance with confidence validation."""
         if not urls:
-            return []
+            return {'success': False, 'reason': 'No URLs to rank', 'confidence': 0.0}
         
         # Limit input URLs to prevent token overflow
         input_urls = urls[:20]  # Max 20 URLs to rank
@@ -471,16 +709,18 @@ class URLDiscoveryService:
         - Description relevance to {category}
         - Overall quality for competitive analysis
         
-        Respond with only the top {limit} most relevant URLs in order, using this format:
-        1. [URL number from list]
-        2. [URL number from list]
-        3. [URL number from list]
-        ...
+        IMPORTANT: If none of the URLs seem relevant to {category} for {competitor_name}, 
+        respond with "NO_RELEVANT_URLS" instead of ranking.
+        
+        If URLs are relevant, respond with the top {limit} most relevant URLs in order:
+        RANKING: [URL numbers in order]
+        CONFIDENCE: [0.0-1.0 confidence in the ranking]
+        REASON: [Brief explanation]
         
         Example response:
-        1. 3
-        2. 7
-        3. 1
+        RANKING: 3,7,1,5
+        CONFIDENCE: 0.8
+        REASON: URLs clearly related to pricing with official domain
         """
         
         try:
@@ -489,42 +729,90 @@ class URLDiscoveryService:
             else:  # openai
                 response_text = await self._openai_query(prompt)
             
+            # Check for no relevant URLs response
+            if "NO_RELEVANT_URLS" in response_text.upper():
+                return {
+                    'success': False,
+                    'reason': 'LLM determined no URLs are relevant for this category',
+                    'confidence': 0.0
+                }
+            
             # Parse the ranking response
-            ranked_indices = []
+            ranking_line = ""
+            confidence = 0.5
+            reason = "Ranking completed"
+            
             for line in response_text.split('\n'):
                 line = line.strip()
-                if line and line[0].isdigit():
+                if line.startswith('RANKING:'):
+                    ranking_line = line.split(':', 1)[1].strip()
+                elif line.startswith('CONFIDENCE:'):
                     try:
-                        # Extract number after the dot
-                        rank_match = re.search(r'^\d+\.\s*(\d+)', line)
-                        if rank_match:
-                            idx = int(rank_match.group(1)) - 1  # Convert to 0-based index
-                            if 0 <= idx < len(input_urls):
-                                ranked_indices.append(idx)
-                    except (ValueError, IndexError):
-                        continue
+                        confidence = float(line.split(':')[1].strip())
+                    except:
+                        confidence = 0.5
+                elif line.startswith('REASON:'):
+                    reason = line.split(':', 1)[1].strip()
+            
+            if not ranking_line:
+                return {
+                    'success': False,
+                    'reason': 'Could not parse ranking response',
+                    'confidence': 0.0
+                }
+            
+            # Parse ranking indices
+            ranked_indices = []
+            for num_str in ranking_line.split(','):
+                try:
+                    idx = int(num_str.strip()) - 1  # Convert to 0-based index
+                    if 0 <= idx < len(input_urls):
+                        ranked_indices.append(idx)
+                except ValueError:
+                    continue
+            
+            if not ranked_indices:
+                return {
+                    'success': False,
+                    'reason': 'No valid ranking indices found',
+                    'confidence': 0.0
+                }
             
             # Return URLs in ranked order
             ranked_urls = []
             for idx in ranked_indices[:limit]:
                 ranked_urls.append(input_urls[idx])
             
-            logger.info(f"📊 Ranked {len(ranked_urls)} URLs for {category} using {llm_choice}")
-            return ranked_urls
+            logger.info(f"📊 Ranked {len(ranked_urls)} URLs for {category} using {llm_choice} (confidence: {confidence:.2f})")
+            
+            return {
+                'success': True,
+                'urls': ranked_urls,
+                'confidence': confidence,
+                'reason': reason
+            }
             
         except Exception as e:
             logger.error(f"❌ LLM ranking failed for {category}: {e}")
-            # Fallback to simple scoring
-            return urls[:limit]
+            return {
+                'success': False,
+                'reason': f'Ranking error: {str(e)}',
+                'confidence': 0.0
+            }
 
-    async def _llm_select_best_url(self, urls: List[Dict[str, Any]], category: str, 
+    async def _llm_select_best_url_with_confidence(self, urls: List[Dict[str, Any]], category: str, 
                                  competitor_name: str, llm_choice: str) -> Dict[str, Any]:
-        """Use LLM to select the single best URL from a list."""
+        """Use LLM to select the single best URL with confidence validation."""
         if not urls:
-            return None
+            return {'success': False, 'reason': 'No URLs to select from', 'confidence': 0.0}
         
         if len(urls) == 1:
-            return urls[0]
+            return {
+                'success': True,
+                'url': urls[0],
+                'confidence': 0.8,  # High confidence for single option
+                'reason': 'Single URL available'
+            }
         
         # Create URL options for LLM
         url_options = []
@@ -551,7 +839,18 @@ class URLDiscoveryService:
         - Up-to-date information
         - Competitive intelligence value
         
-        Respond with only the number of your choice (1, 2, 3, etc.):
+        IMPORTANT: If none of the URLs seem appropriate for {category} information about {competitor_name},
+        respond with "NO_SUITABLE_URL" instead of selecting.
+        
+        If a URL is suitable, respond with:
+        SELECTION: [URL number]
+        CONFIDENCE: [0.0-1.0 confidence in the selection]
+        REASON: [Brief explanation why this URL is best]
+        
+        Example response:
+        SELECTION: 2
+        CONFIDENCE: 0.9
+        REASON: Official pricing page with comprehensive plan details
         """
         
         try:
@@ -560,271 +859,59 @@ class URLDiscoveryService:
             else:  # openai
                 response_text = await self._openai_query(prompt)
             
-            # Parse the selection
-            selection_match = re.search(r'(\d+)', response_text.strip())
-            if selection_match:
-                selected_idx = int(selection_match.group(1)) - 1  # Convert to 0-based
-                if 0 <= selected_idx < len(urls):
-                    logger.info(f"🎯 Selected URL {selected_idx + 1} for {category} using {llm_choice}")
-                    return urls[selected_idx]
+            # Check for no suitable URL response
+            if "NO_SUITABLE_URL" in response_text.upper():
+                return {
+                    'success': False,
+                    'reason': 'LLM determined no URLs are suitable for this category',
+                    'confidence': 0.0
+                }
             
-            # Fallback to first URL
-            logger.warning(f"⚠️ Could not parse LLM selection, using first URL")
-            return urls[0]
+            # Parse the selection response
+            selection_num = None
+            confidence = 0.5
+            reason = "Selection completed"
+            
+            for line in response_text.split('\n'):
+                line = line.strip()
+                if line.startswith('SELECTION:'):
+                    try:
+                        selection_num = int(line.split(':')[1].strip())
+                    except:
+                        continue
+                elif line.startswith('CONFIDENCE:'):
+                    try:
+                        confidence = float(line.split(':')[1].strip())
+                    except:
+                        confidence = 0.5
+                elif line.startswith('REASON:'):
+                    reason = line.split(':', 1)[1].strip()
+            
+            if selection_num is None or selection_num < 1 or selection_num > len(urls):
+                return {
+                    'success': False,
+                    'reason': 'Invalid or missing selection number',
+                    'confidence': 0.0
+                }
+            
+            selected_url = urls[selection_num - 1]  # Convert to 0-based index
+            
+            logger.info(f"🎯 Selected URL {selection_num} for {category} using {llm_choice} (confidence: {confidence:.2f})")
+            
+            return {
+                'success': True,
+                'url': selected_url,
+                'confidence': confidence,
+                'reason': reason
+            }
             
         except Exception as e:
             logger.error(f"❌ LLM selection failed for {category}: {e}")
-            return urls[0]  # Fallback to first URL
-
-    async def _cohere_query(self, prompt: str) -> str:
-        """Execute a Cohere query."""
-        response = await asyncio.get_event_loop().run_in_executor(
-            None, lambda: self.cohere_client.invoke(prompt)
-        )
-        
-        if hasattr(response, 'content'):
-            return response.content
-        else:
-            return str(response)
-
-    async def _openai_query(self, prompt: str) -> str:
-        """Execute an OpenAI query."""
-        from openai import OpenAI
-        client = OpenAI(api_key=self.openai_api_key, max_retries=1, timeout=15.0)
-        
-        response = await asyncio.get_event_loop().run_in_executor(
-            None, lambda: client.chat.completions.create(
-                model="gpt-4",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=200
-            )
-        )
-        
-        return response.choices[0].message.content.strip()
-
-    def _generate_targeted_search_queries(self, competitor_name: str, official_domains: List[str], categories: List[str], depth: str) -> List[str]:
-        """Generate targeted search queries using the discovered top 3 domains."""
-        queries = []
-        
-        logger.info(f"🔍 Generating targeted searches for {len(official_domains)} domains and {len(categories)} categories...")
-        
-        # For each category, create searches targeting the discovered domains
-        for category in categories:
-            # Generic search query (not domain-specific)
-            queries.append(f"{competitor_name} {category}")
-            
-            # Domain-specific queries for each discovered domain
-            for domain in official_domains:
-                if depth != "quick":
-                    # Site-specific search for this domain
-                    queries.append(f"site:{domain} {category}")
-                    
-                    # Add comprehensive variations for certain categories
-                    if depth == "comprehensive":
-                        category_variations = {
-                            'pricing': ['price', 'cost', 'plans', 'subscription'],
-                            'features': ['product', 'capabilities', 'functionality'],
-                            'about': ['company', 'team', 'story'],
-                            'contact': ['support', 'help', 'customer-service'],
-                            'blog': ['news', 'articles', 'insights'],
-                            'careers': ['jobs', 'hiring', 'work'],
-                            'docs': ['documentation', 'api', 'developer'],
-                            'social': ['twitter', 'linkedin', 'facebook']
-                        }
-                        
-                        variations = category_variations.get(category, [])
-                        for variation in variations[:1]:  # Limit to 1 variation per category per domain
-                            queries.append(f"site:{domain} {variation}")
-        
-        # If quick mode, limit to primary domain only
-        if depth == "quick":
-            primary_domain = official_domains[0] if official_domains else None
-            if primary_domain:
-                queries = [q for q in queries if 'site:' not in q or primary_domain in q]
-        
-        logger.info(f"📝 Generated {len(queries)} targeted search queries")
-        return queries
-
-    def _deduplicate_results(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Remove duplicate URLs from results."""
-        seen_urls = set()
-        unique_results = []
-        
-        for result in results:
-            url = result.get('url', '')
-            if url and url not in seen_urls:
-                seen_urls.add(url)
-                unique_results.append(result)
-        
-        return unique_results
-
-    def _rank_results_by_relevance(self, results: List[Dict[str, Any]], categories: List[str]) -> List[Dict[str, Any]]:
-        """Rank results by relevance to the searched categories."""
-        def calculate_relevance_score(result):
-            score = 0.0
-            url = result.get('url', '').lower()
-            title = result.get('title', '').lower()
-            snippet = result.get('snippet', '').lower()
-            
-            # Score based on category keywords in URL (highest weight)
-            for category in categories:
-                if category.lower() in url:
-                    score += 3.0
-                if any(keyword in url for keyword in [category.lower(), f'{category.lower()}s']):
-                    score += 2.0
-            
-            # Score based on category keywords in title (high weight)
-            for category in categories:
-                if category.lower() in title:
-                    score += 2.0
-                    
-            # Score based on category keywords in snippet (medium weight)
-            for category in categories:
-                if category.lower() in snippet:
-                    score += 1.0
-            
-            # Bonus for common important page indicators
-            url_indicators = {
-                'pricing': ['pricing', 'price', 'cost', 'plans', 'subscription'],
-                'features': ['features', 'product', 'capabilities'],
-                'blog': ['blog', 'news', 'articles'],
-                'about': ['about', 'company', 'team'],
-                'contact': ['contact', 'support', 'help']
+            return {
+                'success': False,
+                'reason': f'Selection error: {str(e)}',
+                'confidence': 0.0
             }
-            
-            for category in categories:
-                indicators = url_indicators.get(category, [])
-                for indicator in indicators:
-                    if indicator in url:
-                        score += 1.5
-                    if indicator in title:
-                        score += 1.0
-            
-            return score
-        
-        # Sort by relevance score (highest first)
-        ranked_results = sorted(results, key=calculate_relevance_score, reverse=True)
-        
-        # Log top results for debugging
-        for i, result in enumerate(ranked_results[:5]):
-            score = calculate_relevance_score(result)
-            logger.info(f"📊 Rank {i+1}: {result.get('url', '')[:60]}... (score: {score:.1f})")
-        
-        return ranked_results
-
-    async def _llm_categorize_and_select(self, results: List[Dict[str, Any]], competitor_name: str, categories: List[str]) -> List[Dict[str, Any]]:
-        """Use LLM to categorize the top 10 most relevant URLs and select the best one per category."""
-        if not results:
-            return results
-        
-        # If no AI available, use basic categorization
-        if not self.llm and not self.cohere_client:
-            logger.info("🔧 No AI available, using pattern-based categorization")
-            return self._basic_categorization(results, categories)
-        
-        logger.info(f"🤖 Using LLM to categorize {len(results)} top-ranked URLs...")
-        
-        # Categorize each URL using AI
-        categorized_results = []
-        for i, result in enumerate(results):
-            try:
-                category, confidence, method = await self._ai_categorize_url_with_fallback(result, competitor_name, categories)
-                logger.info(f"   ✅ URL {i+1}: {result.get('url', 'Unknown')[:50]}... -> {category} ({confidence:.2f}, {method})")
-            except Exception as e:
-                logger.warning(f"   ⚠️ URL {i+1} failed: {e}")
-                category, confidence = self._pattern_categorize_url(result, categories)
-                method = 'pattern_matching'
-            
-            enhanced_result = {
-                **result,
-                'category': category,
-                'confidence_score': confidence,
-                'discovery_method': method
-            }
-            categorized_results.append(enhanced_result)
-        
-        # Group URLs by category
-        category_groups = {}
-        for result in categorized_results:
-            category = result.get('category', 'general')
-            if category != 'general':  # Skip general category
-                if category not in category_groups:
-                    category_groups[category] = []
-                category_groups[category].append(result)
-        
-        logger.info(f"📂 Found categories: {list(category_groups.keys())}")
-        
-        # Select the best URL for each category
-        final_results = []
-        for category, urls in category_groups.items():
-            # Sort by confidence score and take the best ones
-            top_urls = sorted(urls, key=lambda x: x.get('confidence_score', 0), reverse=True)
-            
-            if len(top_urls) == 1:
-                # Only one URL, use it directly
-                selected_url = top_urls[0]
-                selected_url['selection_method'] = 'single_option'
-                final_results.append(selected_url)
-                logger.info(f"📄 {category.upper()}: Selected only URL -> {selected_url.get('url', '')}")
-            else:
-                # Multiple URLs, use LLM to select the best one from top candidates
-                # Limit to top 5 candidates for LLM selection to avoid token limits
-                llm_candidates = top_urls[:5]
-                try:
-                    best_url = await self._select_best_url_for_category(
-                        llm_candidates, category, competitor_name, 
-                        results[0].get('url', '') if results else ''
-                    )
-                    final_results.append(best_url)
-                    logger.info(f"📄 {category.upper()}: LLM selected -> {best_url.get('url', '')}")
-                except Exception as e:
-                    logger.warning(f"⚠️ LLM selection failed for {category}, using highest confidence URL: {e}")
-                    selected_url = top_urls[0]  # Fallback to highest confidence
-                    selected_url['selection_method'] = 'confidence_fallback'
-                    final_results.append(selected_url)
-        
-        logger.info(f"✅ Final selection: {len(final_results)} URLs (1 per category)")
-        return final_results
-
-    def _is_same_domain(self, url: str, base_url: str, official_domains: List[str] = None) -> bool:
-        """Check if URL belongs to the same domain as base_url (including subdomains and related brand domains)."""
-        try:
-            from urllib.parse import urlparse
-            
-            # Parse both URLs
-            url_parsed = urlparse(url.lower())
-            base_parsed = urlparse(base_url.lower())
-            
-            # Extract domain parts
-            url_domain = url_parsed.netloc
-            base_domain = base_parsed.netloc
-            
-            # Remove 'www.' prefix for comparison
-            url_domain = url_domain.replace('www.', '')
-            base_domain = base_domain.replace('www.', '')
-            
-            # Check if it's the exact same domain
-            if url_domain == base_domain:
-                return True
-            
-            # Check if url_domain is a subdomain of base_domain
-            if url_domain.endswith('.' + base_domain):
-                return True
-            
-            # Check if base_domain is a subdomain of url_domain (reverse case)
-            if base_domain.endswith('.' + url_domain):
-                return True
-            
-            # NEW: Check for related brand domains using LLM-discovered official domains
-            if official_domains and self._is_same_brand_domain(url_domain, base_domain, official_domains):
-                return True
-            
-            return False
-            
-        except Exception as e:
-            logger.warning(f"⚠️ Error comparing domains for {url} vs {base_url}: {e}")
-            return False
 
     async def _discover_brand_domains(self, competitor_name: str, base_url: str) -> List[str]:
         """Use LLM to discover all official domains for a brand."""
@@ -1001,563 +1088,108 @@ api.notion.com"""
         
         return False
 
-    def _is_same_brand_domain(self, url_domain: str, base_domain: str, official_domains: List[str] = None) -> bool:
-        """Check if two domains belong to the same brand using discovered official domains."""
+    def _is_same_domain(self, url: str, base_url: str, official_domains: List[str] = None) -> bool:
+        """Check if URL belongs to the same domain as base_url (including subdomains and related brand domains)."""
         try:
-            # Clean domains for comparison
-            url_clean = url_domain.replace('www.', '').lower()
-            base_clean = base_domain.replace('www.', '').lower()
+            from urllib.parse import urlparse
             
-            # Check against official domains list if provided
-            if official_domains:
-                # Extract main domain from URL (remove subdomains for comparison)
-                def get_main_domain(domain):
-                    parts = domain.split('.')
-                    if len(parts) >= 2:
-                        return '.'.join(parts[-2:])  # Keep last two parts (domain.tld)
-                    return domain
-                
-                url_main = get_main_domain(url_clean)
-                
-                # Check if the URL's main domain is in the official domains list
-                for official_domain in official_domains:
-                    official_clean = official_domain.replace('www.', '').lower()
-                    official_main = get_main_domain(official_clean)
-                    
-                    if url_main == official_main:
-                        logger.info(f"🔗 Official brand domain match: {url_domain} ↔ {base_domain} (found in official domains)")
-                        return True
+            # Parse both URLs
+            url_parsed = urlparse(url.lower())
+            base_parsed = urlparse(base_url.lower())
+            
+            # Extract domain parts
+            url_domain = url_parsed.netloc
+            base_domain = base_parsed.netloc
+            
+            # Remove 'www.' prefix for comparison
+            url_domain = url_domain.replace('www.', '')
+            base_domain = base_domain.replace('www.', '')
+            
+            # Check if it's the exact same domain
+            if url_domain == base_domain:
+                return True
+            
+            # Check if url_domain is a subdomain of base_domain
+            if url_domain.endswith('.' + base_domain):
+                return True
+            
+            # Check if base_domain is a subdomain of url_domain (reverse case)
+            if base_domain.endswith('.' + url_domain):
+                return True
+            
+            # NEW: Check for related brand domains using LLM-discovered official domains
+            if official_domains and self._is_same_brand_domain(url_domain, base_domain, official_domains):
+                return True
             
             return False
             
         except Exception as e:
-            logger.warning(f"⚠️ Error checking brand domains for {url_domain} vs {base_domain}: {e}")
+            logger.warning(f"⚠️ Error comparing domains for {url} vs {base_url}: {e}")
             return False
 
-    async def _select_best_url_for_category(self, urls: List[Dict[str, Any]], category: str, competitor_name: str, base_url: str) -> Dict[str, Any]:
-        """Use LLM to select the single best URL for a specific category (URLs are already domain-filtered)."""
+    def _is_same_brand_domain(self, url_domain: str, base_domain: str, official_domains: List[str]) -> bool:
+        """Check if URL domain matches any of the discovered official brand domains."""
+        url_domain_clean = url_domain.replace('www.', '').lower()
         
-        # URLs are already filtered to same-domain in calling function
-        logger.info(f"✅ Selecting best URL from {len(urls)} candidates for {category} (max 10)")
-        
-        # Prepare URLs for LLM selection
-        url_options = []
-        for i, url_data in enumerate(urls):
-            url_options.append(f"""
-Option {i+1}:
-URL: {url_data.get('url', '')}
-Title: {url_data.get('title', '')}
-Snippet: {url_data.get('snippet', '')}""")
-        
-        prompt = f"""You are analyzing competitor URLs for {competitor_name}. 
-        
-I need you to select the single best URL that represents the {category} page for this company.
-
-Here are {len(urls)} candidate URLs from {base_url} (sorted by relevance, all from the same domain):
-{chr(10).join(url_options)}
-
-Please analyze these URLs and select the one that is most likely to be the main {category} page for {competitor_name}.
-
-Respond with ONLY the number (1 to {len(urls)}) of the best option. Do not include any explanation or additional text."""
-
-        try:
-            # Try Cohere first
-            if self.cohere_client:
-                try:
-                    response = await self._cohere_select_url(prompt)
-                    selection = self._parse_url_selection(response, len(urls))
-                    if selection is not None:
-                        selected_url = urls[selection]
-                        selected_url['selection_method'] = 'cohere_selection'
-                        return selected_url
-                except Exception as e:
-                    logger.warning(f"⚠️ Cohere URL selection failed: {e}")
+        for official_domain in official_domains:
+            official_domain_clean = official_domain.replace('www.', '').lower()
             
-            # Try OpenAI as fallback
-            if self.llm:
-                try:
-                    response = await self._openai_select_url(prompt)
-                    selection = self._parse_url_selection(response, len(urls))
-                    if selection is not None:
-                        selected_url = urls[selection]
-                        selected_url['selection_method'] = 'openai_selection'
-                        return selected_url
-                except Exception as e:
-                    logger.warning(f"⚠️ OpenAI URL selection failed: {e}")
+            # Direct match
+            if url_domain_clean == official_domain_clean:
+                return True
             
-            # Fallback to highest confidence
-            logger.info("🔧 Using confidence-based selection as fallback")
-            selected_url = urls[0]  # Already sorted by confidence
-            selected_url['selection_method'] = 'confidence_fallback'
-            return selected_url
-            
-        except Exception as e:
-            logger.error(f"❌ URL selection failed: {e}")
-            return urls[0]  # Return first URL as ultimate fallback
-
-    async def _cohere_select_url(self, prompt: str) -> str:
-        """Use Cohere to select the best URL."""
-        if not self.cohere_client:
-            raise Exception("Cohere client not available")
-        
-        try:
-            # Use the correct Cohere API method
-            response = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: self.cohere_client.invoke(prompt)
-            )
-            
-            # Cohere returns a response object with content
-            if hasattr(response, 'content'):
-                return response.content.strip()
-            else:
-                return str(response).strip()
+            # Subdomain match (e.g., app.cursor.com matches cursor.com)
+            if url_domain_clean.endswith('.' + official_domain_clean):
+                return True
                 
-        except Exception as e:
-            raise Exception(f"Cohere selection failed: {e}")
-
-    async def _openai_select_url(self, prompt: str) -> str:
-        """Use OpenAI to select the best URL."""
-        if not self.llm:
-            raise Exception("OpenAI client not available")
+            # Reverse subdomain match (e.g., cursor.com matches app.cursor.com)
+            if official_domain_clean.endswith('.' + url_domain_clean):
+                return True
         
-        try:
-            # Create a custom OpenAI client with faster failure
-            from openai import OpenAI
-            custom_client = OpenAI(
-                api_key=self.openai_api_key,
-                max_retries=1,
-                timeout=10.0
-            )
-            
-            response = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: custom_client.chat.completions.create(
-                    model="gpt-4",
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.1,
-                    max_tokens=10
-                )
-            )
-            
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            raise Exception(f"OpenAI selection failed: {e}")
+        return False
 
-    def _parse_url_selection(self, response: str, num_options: int) -> Optional[int]:
-        """Parse LLM response to extract URL selection."""
-        try:
-            import re
+    def _generate_targeted_search_queries(self, competitor_name: str, official_domains: List[str], categories: List[str], depth: str) -> List[str]:
+        """Generate targeted search queries using the discovered top 3 domains."""
+        queries = []
+        
+        logger.info(f"🔍 Generating targeted searches for {len(official_domains)} domains and {len(categories)} categories...")
+        
+        # For each category, create searches targeting the discovered domains
+        for category in categories:
+            # Generic search query (not domain-specific)
+            queries.append(f"{competitor_name} {category}")
             
-            # Look for any number in the response that's within valid range
-            numbers = re.findall(r'\b(\d+)\b', response)
-            for num_str in numbers:
-                selection = int(num_str) - 1  # Convert to 0-based index
-                if 0 <= selection < num_options:
-                    return selection
-            
-            # Try to find a number at the start of the response
-            response_clean = response.strip()
-            if response_clean and response_clean[0].isdigit():
-                selection = int(response_clean[0]) - 1
-                if 0 <= selection < num_options:
-                    return selection
+            # Domain-specific queries for each discovered domain
+            for domain in official_domains:
+                if depth != "quick":
+                    # Site-specific search for this domain
+                    queries.append(f"site:{domain} {category}")
                     
-            logger.warning(f"⚠️ Could not parse URL selection from response: '{response}' (expected 1-{num_options})")
-            return None
-            
-        except Exception as e:
-            logger.error(f"❌ Error parsing URL selection: {e}")
-            return None
-
-    async def _ai_categorize_url_with_fallback(self, result: Dict[str, Any], competitor_name: str, valid_categories: List[str]) -> tuple:
-        """AI categorization with predefined categories and Cohere -> OpenAI -> Pattern matching fallback chain."""
+                    # Add comprehensive variations for certain categories
+                    if depth == "comprehensive":
+                        category_variations = {
+                            'pricing': ['price', 'cost', 'plans', 'subscription'],
+                            'features': ['product', 'capabilities', 'functionality'],
+                            'about': ['company', 'team', 'story'],
+                            'contact': ['support', 'help', 'customer-service'],
+                            'blog': ['news', 'articles', 'insights'],
+                            'careers': ['jobs', 'hiring', 'work'],
+                            'docs': ['documentation', 'api', 'developer'],
+                            'social': ['twitter', 'linkedin', 'facebook']
+                        }
+                        
+                        variations = category_variations.get(category, [])
+                        for variation in variations[:1]:  # Limit to 1 variation per category per domain
+                            queries.append(f"site:{domain} {variation}")
         
-        # Use the provided categories from test file/database
-        categories_text = ", ".join(valid_categories)
+        # If quick mode, limit to primary domain only
+        if depth == "quick":
+            primary_domain = official_domains[0] if official_domains else None
+            if primary_domain:
+                queries = [q for q in queries if 'site:' not in q or primary_domain in q]
         
-        # Try Cohere first (primary AI)
-        if self.cohere_client:
-            try:
-                category, confidence = await self._cohere_categorize_url(result, competitor_name, categories_text, valid_categories)
-                return category, confidence, 'cohere_enhanced'
-            except Exception as e:
-                logger.warning(f"⚠️ Cohere categorization failed: {e}")
-        
-        # Try OpenAI as fallback
-        if self.llm:
-            try:
-                category, confidence = await self._openai_categorize_url(result, competitor_name, categories_text, valid_categories)
-                return category, confidence, 'openai_enhanced'
-            except Exception as e:
-                # Check if it's a quota/rate limit error
-                error_str = str(e).lower()
-                if any(keyword in error_str for keyword in ['quota', '429', 'rate limit', 'insufficient_quota']):
-                    logger.warning(f"🚫 OpenAI quota/rate limit exceeded: {e}")
-                else:
-                    logger.warning(f"⚠️ OpenAI categorization failed: {e}")
-        
-        # Final fallback to pattern matching
-        logger.info("🔧 Using pattern-based categorization as final fallback")
-        category, confidence = self._pattern_categorize_url(result, valid_categories)
-        return category, confidence, 'pattern_matching'
-
-    async def _openai_categorize_url(self, result: Dict[str, Any], competitor_name: str, categories_text: str, valid_categories: List[str]) -> tuple:
-        """Use OpenAI to categorize URL with predefined categories and assign confidence score."""
-        
-        # Create detailed category descriptions to help LLM understand the differences
-        category_descriptions = {
-            'pricing': 'Subscription plans, costs, billing information, pricing tiers',
-            'features': 'Product capabilities, functionality, tools, what the product does',
-            'blog': 'Company blog, news articles, insights, thought leadership content, announcements, blog templates',
-            'about': 'Company information, team, mission, story, company background',
-            'contact': 'Contact information, support, help desk, customer service',
-            'social': 'Social media profiles (Twitter, LinkedIn, Facebook, Instagram)',
-            'careers': 'Job openings, hiring, work opportunities, company culture',
-            'docs': 'Documentation, API guides, developer resources, technical guides',
-            'templates': 'User-created templates, examples, showcases (consider if blog-related)',
-            'general': 'Other pages that don\'t fit specific categories'
-        }
-        
-        # Build detailed descriptions for the valid categories
-        detailed_categories = []
-        for cat in valid_categories:
-            if cat in category_descriptions:
-                detailed_categories.append(f"{cat}: {category_descriptions[cat]}")
-        
-        detailed_categories_text = "\n".join(detailed_categories)
-        
-        prompt = f"""
-        Analyze this URL and content for competitor research on {competitor_name}:
-        
-        URL: {result.get('url', '')}
-        Title: {result.get('title', '')}
-        Snippet: {result.get('snippet', '')}
-        
-        Categorize this as ONE of these specific categories:
-        {detailed_categories_text}
-        
-        IMPORTANT DISTINCTIONS:
-        - "blog": Company's official blog with articles, news, insights, announcements, OR blog templates/tools
-        - "features": Product functionality, capabilities, what the software does
-        - "pricing": Subscription plans, costs, billing information
-        
-        SPECIAL CASES:
-        - If it's a blog template, blog tool, or blog-related template → choose "blog"
-        - If it contains "/blog", "blog-", "blog_", or "blog template" → choose "blog"
-        - Look carefully at the URL path and content for blog indicators
-        
-        You MUST choose from the provided categories only: {', '.join(valid_categories)}
-        
-        Provide a confidence score from 0.0 to 1.0 for how certain you are about this categorization.
-        
-        Respond in format: "Category: [category], Confidence: [score]"
-        """
-        
-        # Create a custom OpenAI client with faster failure for quota errors
-        from openai import OpenAI
-        custom_client = OpenAI(
-            api_key=self.openai_api_key,
-            max_retries=1,  # Reduce retries for faster fallback
-            timeout=10.0    # Shorter timeout
-        )
-        
-        try:
-            response = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: custom_client.chat.completions.create(
-                    model="gpt-4",
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.3,
-                    max_tokens=50
-                )
-            )
-            
-            # Parse response
-            response_text = response.choices[0].message.content.strip()
-            category_match = re.search(r'Category:\s*(\w+)', response_text, re.IGNORECASE)
-            confidence_match = re.search(r'Confidence:\s*([\d.]+)', response_text)
-            
-            category = category_match.group(1).lower() if category_match else 'general'
-            confidence = float(confidence_match.group(1)) if confidence_match else 0.5
-            
-            # Smart category mapping for edge cases
-            category = self._map_category_to_valid(category, valid_categories, result)
-            
-            logger.info(f"✅ OpenAI categorization: {category} (confidence: {confidence:.2f})")
-            return category, min(max(confidence, 0.0), 1.0)  # Clamp between 0-1
-            
-        except Exception as e:
-            # Check for quota/rate limit errors and fail fast
-            error_str = str(e).lower()
-            if any(keyword in error_str for keyword in ['quota', '429', 'rate limit', 'insufficient_quota']):
-                # Don't retry on quota errors - fail immediately to trigger fallback
-                raise Exception(f"OpenAI quota exceeded: {e}")
-            else:
-                raise
-
-    async def _cohere_categorize_url(self, result: Dict[str, Any], competitor_name: str, categories_text: str, valid_categories: List[str]) -> tuple:
-        """Use Cohere to categorize URL with predefined categories and assign confidence score."""
-        
-        # Create detailed category descriptions to help LLM understand the differences
-        category_descriptions = {
-            'pricing': 'Subscription plans, costs, billing information, pricing tiers',
-            'features': 'Product capabilities, functionality, tools, what the product does',
-            'blog': 'Company blog, news articles, insights, thought leadership content, announcements, blog templates',
-            'about': 'Company information, team, mission, story, company background',
-            'contact': 'Contact information, support, help desk, customer service',
-            'social': 'Social media profiles (Twitter, LinkedIn, Facebook, Instagram)',
-            'careers': 'Job openings, hiring, work opportunities, company culture',
-            'docs': 'Documentation, API guides, developer resources, technical guides',
-            'templates': 'User-created templates, examples, showcases (consider if blog-related)',
-            'general': 'Other pages that don\'t fit specific categories'
-        }
-        
-        # Build detailed descriptions for the valid categories
-        detailed_categories = []
-        for cat in valid_categories:
-            if cat in category_descriptions:
-                detailed_categories.append(f"{cat}: {category_descriptions[cat]}")
-        
-        detailed_categories_text = "\n".join(detailed_categories)
-        
-        prompt = f"""
-        Analyze this URL and content for competitor research on {competitor_name}:
-        
-        URL: {result.get('url', '')}
-        Title: {result.get('title', '')}
-        Snippet: {result.get('snippet', '')}
-        
-        Categorize this as ONE of these specific categories:
-        {detailed_categories_text}
-        
-        IMPORTANT DISTINCTIONS:
-        - "blog": Company's official blog with articles, news, insights, announcements, OR blog templates/tools
-        - "features": Product functionality, capabilities, what the software does
-        - "pricing": Subscription plans, costs, billing information
-        
-        SPECIAL CASES:
-        - If it's a blog template, blog tool, or blog-related template → choose "blog"
-        - If it contains "/blog", "blog-", "blog_", or "blog template" → choose "blog"
-        - Look carefully at the URL path and content for blog indicators
-        
-        You MUST choose from the provided categories only: {', '.join(valid_categories)}
-        
-        Provide a confidence score from 0.0 to 1.0 for how certain you are about this categorization.
-        
-        Respond in format: "Category: [category], Confidence: [score]"
-        """
-        
-        try:
-            # Use Cohere client with correct invoke method
-            response = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: self.cohere_client.invoke(prompt)
-            )
-            
-            # Parse response (Cohere returns different response types)
-            if hasattr(response, 'content'):
-                response_text = response.content
-            else:
-                response_text = str(response)
-                
-            category_match = re.search(r'Category:\s*(\w+)', response_text, re.IGNORECASE)
-            confidence_match = re.search(r'Confidence:\s*([\d.]+)', response_text)
-            
-            category = category_match.group(1).lower() if category_match else 'general'
-            confidence = float(confidence_match.group(1)) if confidence_match else 0.5
-            
-            # Smart category mapping for edge cases
-            category = self._map_category_to_valid(category, valid_categories, result)
-            
-            logger.info(f"✅ Cohere categorization: {category} (confidence: {confidence:.2f})")
-            return category, min(max(confidence, 0.0), 1.0)  # Clamp between 0-1
-            
-        except Exception as e:
-            raise Exception(f"Cohere categorization failed: {e}")
-
-    def _map_category_to_valid(self, category: str, valid_categories: List[str], result: Dict[str, Any]) -> str:
-        """Map LLM-returned category to valid categories with smart logic."""
-        # If the category is already valid, return it
-        if category in valid_categories:
-            return category
-        
-        # Smart mapping for common edge cases
-        url = result.get('url', '').lower()
-        title = result.get('title', '').lower()
-        snippet = result.get('snippet', '').lower()
-        
-        # Map templates to appropriate categories based on context
-        if category == 'templates':
-            # Check if it's blog-related template
-            if ('blog' in valid_categories and 
-                any(indicator in url or indicator in title or indicator in snippet 
-                    for indicator in ['blog', 'article', 'post', 'news', 'insights'])):
-                logger.info(f"🔄 Mapping 'templates' to 'blog' based on content context")
-                return 'blog'
-            # Check if it's feature-related template
-            elif ('features' in valid_categories and 
-                  any(indicator in url or indicator in title or indicator in snippet 
-                      for indicator in ['feature', 'product', 'tool', 'capability'])):
-                logger.info(f"🔄 Mapping 'templates' to 'features' based on content context")
-                return 'features'
-        
-        # Map other common mismatches
-        category_mappings = {
-            'documentation': 'docs',
-            'doc': 'docs',
-            'api': 'docs',
-            'guide': 'docs',
-            'help': 'docs',
-            'support': 'contact',
-            'price': 'pricing',
-            'cost': 'pricing',
-            'plan': 'pricing',
-            'subscription': 'pricing',
-            'product': 'features',
-            'capability': 'features',
-            'functionality': 'features',
-            'tool': 'features',
-            'news': 'blog',
-            'article': 'blog',
-            'insight': 'blog',
-            'post': 'blog',
-            'company': 'about',
-            'team': 'about',
-            'mission': 'about',
-            'story': 'about',
-            'job': 'careers',
-            'hiring': 'careers',
-            'work': 'careers',
-            'career': 'careers'
-        }
-        
-        # Try to map the category
-        mapped_category = category_mappings.get(category)
-        if mapped_category and mapped_category in valid_categories:
-            logger.info(f"🔄 Mapping '{category}' to '{mapped_category}'")
-            return mapped_category
-        
-        # If no mapping found, default to 'general' if available, otherwise first valid category
-        if 'general' in valid_categories:
-            logger.warning(f"⚠️ LLM returned invalid category '{category}', using 'general'")
-            return 'general'
-        else:
-            logger.warning(f"⚠️ LLM returned invalid category '{category}', using '{valid_categories[0]}'")
-            return valid_categories[0]
-
-    def _pattern_categorize_url(self, result: Dict[str, Any], valid_categories: List[str]) -> tuple:
-        """Pattern-based URL categorization using provided categories."""
-        url = result.get('url', '').lower()
-        title = result.get('title', '').lower()
-        snippet = result.get('snippet', '').lower()
-        
-        category = 'general'
-        confidence = 0.6  # Default confidence for pattern matching
-        
-        # Enhanced pattern matching with better blog detection
-        category_patterns = {
-            'pricing': {
-                'url_patterns': ['pricing', 'price', 'cost', 'plans', 'subscription', 'billing', '/plan'],
-                'content_patterns': ['pricing', 'plans', 'subscription', 'cost', 'billing'],
-                'confidence': 0.9
-            },
-            'blog': {
-                'url_patterns': ['/blog', '/news', '/articles', '/insights', '/resources', '/updates', '/announcements'],
-                'content_patterns': ['blog', 'article', 'news', 'insights', 'thought leadership', 'announcement'],
-                'confidence': 0.85,
-                'exclude_patterns': ['template', 'showcase', 'example']  # Don't classify templates as blog
-            },
-            'features': {
-                'url_patterns': ['features', 'product', 'capabilities', 'functionality', 'solutions', '/templates'],
-                'content_patterns': ['features', 'product', 'capabilities', 'functionality', 'templates'],
-                'confidence': 0.8
-            },
-            'about': {
-                'url_patterns': ['about', 'company', 'team', 'story', 'mission', '/about-us'],
-                'content_patterns': ['about', 'company', 'team', 'story', 'mission'],
-                'confidence': 0.9
-            },
-            'contact': {
-                'url_patterns': ['contact', 'support', 'help', 'customer-service', '/contact-us'],
-                'content_patterns': ['contact', 'support', 'help', 'customer service'],
-                'confidence': 0.9
-            },
-            'social': {
-                'url_patterns': ['twitter.com', 'linkedin.com', 'facebook.com', 'instagram.com', 'tiktok.com', 'youtube.com'],
-                'content_patterns': ['twitter', 'linkedin', 'facebook', 'instagram', 'social'],
-                'confidence': 0.95
-            },
-            'careers': {
-                'url_patterns': ['careers', 'jobs', 'hiring', 'work', '/join', '/careers'],
-                'content_patterns': ['careers', 'jobs', 'hiring', 'work', 'join'],
-                'confidence': 0.9
-            },
-            'docs': {
-                'url_patterns': ['docs', 'documentation', 'api', 'developer', 'guide', '/docs'],
-                'content_patterns': ['documentation', 'api', 'developer', 'guide'],
-                'confidence': 0.9
-            }
-        }
-        
-        # Check each valid category for pattern matches
-        best_match = None
-        highest_confidence = 0
-        
-        for cat in valid_categories:
-            if cat == 'general' or cat not in category_patterns:
-                continue
-            
-            patterns = category_patterns[cat]
-            url_patterns = patterns.get('url_patterns', [])
-            content_patterns = patterns.get('content_patterns', [])
-            exclude_patterns = patterns.get('exclude_patterns', [])
-            pattern_confidence = patterns.get('confidence', 0.7)
-            
-            # Check for exclusion patterns first (especially for blog)
-            if exclude_patterns and any(pattern in url or pattern in title or pattern in snippet 
-                                      for pattern in exclude_patterns):
-                continue
-            
-            # Check URL patterns (higher weight)
-            url_match = any(pattern in url for pattern in url_patterns)
-            
-            # Check content patterns (title and snippet)
-            content_match = any(pattern in title or pattern in snippet for pattern in content_patterns)
-            
-            if url_match or content_match:
-                # Calculate confidence based on match strength
-                match_confidence = pattern_confidence
-                if url_match and content_match:
-                    match_confidence = min(1.0, pattern_confidence + 0.1)  # Boost for both matches
-                elif url_match:
-                    match_confidence = pattern_confidence
-                else:
-                    match_confidence = max(0.6, pattern_confidence - 0.1)  # Lower for content-only match
-                
-                if match_confidence > highest_confidence:
-                    best_match = cat
-                    highest_confidence = match_confidence
-        
-        if best_match:
-            category = best_match
-            confidence = highest_confidence
-        
-        return category, confidence
-
-    def _basic_categorization(self, results: List[Dict[str, Any]], categories: List[str]) -> List[Dict[str, Any]]:
-        """Basic URL categorization without AI (legacy method)."""
-        enhanced_results = []
-        
-        for result in results:
-            category, confidence = self._pattern_categorize_url(result, categories)
-            
-            enhanced_result = {
-                **result,
-                'category': category,
-                'confidence_score': confidence,
-                'discovery_method': 'pattern_matching'
-            }
-            
-            enhanced_results.append(enhanced_result)
-        
-        return enhanced_results
+        logger.info(f"📝 Generated {len(queries)} targeted search queries")
+        return queries
 
     def get_available_search_backends(self) -> List[str]:
         """Get list of available search backends."""
@@ -1587,4 +1219,37 @@ Respond with ONLY the number (1 to {len(urls)}) of the best option. Do not inclu
             'cohere_available': bool(self.cohere_client),
             'fallback_method': 'pattern_matching',
             'categories_source': 'dynamic (from user/database)'
-        } 
+        }
+
+    async def _cohere_query(self, prompt: str) -> str:
+        """Execute a Cohere query."""
+        if not hasattr(self, 'cohere_client') or not self.cohere_client:
+            raise Exception("Cohere client not available")
+        
+        response = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: self.cohere_client.invoke(prompt)
+        )
+        
+        if hasattr(response, 'content'):
+            return response.content
+        else:
+            return str(response)
+
+    async def _openai_query(self, prompt: str) -> str:
+        """Execute an OpenAI query."""
+        if not self.openai_api_key:
+            raise Exception("OpenAI API key not available")
+        
+        from openai import OpenAI
+        client = OpenAI(api_key=self.openai_api_key, max_retries=1, timeout=15.0)
+        
+        response = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: client.chat.completions.create(
+                model="gpt-4",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=200
+            )
+        )
+        
+        return response.choices[0].message.content.strip() 

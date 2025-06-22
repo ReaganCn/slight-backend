@@ -77,21 +77,21 @@ CATEGORIES_TO_SEARCH = ['pricing', 'features', 'blog']
 
 # Real-world test companies (edit as needed)
 TEST_COMPANIES = [
-    # {
-    #     'name': 'Notion',
-    #     'website': 'https://www.notion.so',
-    #     'description': 'All-in-one workspace'
-    # },
+    {
+        'name': 'Notion',
+        'website': 'https://www.notion.so',
+        'description': 'All-in-one workspace'
+    },
     #     {
     #     'name': 'Linear',
     #     'website': 'https://www.linear.app',
     #     'description': ''
     # },
-            {
-        'name': 'Cursor',
-        'website': 'https://www.cursor.com',
-        'description': ''
-    }
+    #         {
+    #     'name': 'Lane',
+    #     'website': 'https://www.lane.co.ke',
+    #     'description': ''
+    # }
 ]
 
 # =============================================================================
