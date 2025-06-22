@@ -18,14 +18,18 @@ The system follows a **serverless microservices architecture** with the followin
          └──────────────│  External APIs  │──────────────┘
                         │ • ScrapingBee   │
                         │ • OpenAI GPT-4  │
+                        │ • LangChain     │
+                        │ • Social Media  │
+                        │ • DuckDuckGo    │
                         └─────────────────┘
 ```
 
 **Data Flow:**
 1. **API Gateway** receives HTTP requests
 2. **Lambda Functions** process business logic
-3. **Database Layer** handles data persistence
-4. **External APIs** provide scraping and AI capabilities
+3. **Services Layer** handles complex operations (URL discovery, social media)
+4. **Database Layer** handles data persistence
+5. **External APIs** provide scraping, AI, and social media capabilities
 
 ---
 
@@ -65,27 +69,92 @@ ScrapeCompetitorFunction:
 
 ### **💾 Database Layer**
 
-#### `src/models.py` - **Data Models & Schema**
+#### `src/models.py` - **Enhanced Data Models & Schema**
 **Purpose:** SQLAlchemy ORM models defining database schema
 **Entry Point:** Imported by all handlers for database operations
 
-**Key Models:**
+**Core Models:**
 - **`User`**: Multi-tenant user management
 - **`Competitor`**: Competitor profiles and scraping configuration
 - **`ScrapeResult`**: Historical pricing/feature data (JSONB storage)
 - **`BattleCard`**: AI-generated competitive intelligence
 - **`ScrapeJob`**: Job tracking and status monitoring
 
-**Example Model Structure:**
+**🆕 NEW: Enhanced Models:**
+- **`CompetitorUrl`**: Discovered URLs with confidence scores and categories
+- **`SocialMediaData`**: Social media metrics and engagement data
+
+**Enhanced Competitor Model:**
 ```python
 class Competitor(Base):
     __tablename__ = "competitors"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"))
-    pricing_url = Column(String(500))
+    
+    # Core fields
+    name = Column(String(200), nullable=False)
+    website = Column(String(500))
+    
+    # URL Discovery Status
+    url_discovery_status = Column(String(50), default="pending")
+    url_discovery_last_run = Column(DateTime(timezone=True))
+    
     # Relationships
     scrape_results = relationship("ScrapeResult", back_populates="competitor")
+    urls = relationship("CompetitorUrl", back_populates="competitor")
+    social_media_data = relationship("SocialMediaData", back_populates="competitor")
+```
+
+**CompetitorUrl Model:**
+```python
+class CompetitorUrl(Base):
+    __tablename__ = "competitor_urls"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    competitor_id = Column(UUID(as_uuid=True), ForeignKey("competitors.id"))
+    
+    # URL Information
+    url = Column(String(1000), nullable=False)
+    category = Column(String(100))  # pricing, features, blog, social, etc.
+    confidence_score = Column(Float)
+    
+    # Status Management
+    status = Column(String(50), default="pending")  # pending, confirmed, rejected
+    discovered_at = Column(DateTime(timezone=True), default=func.now())
+    
+    # Discovery Metadata
+    discovery_method = Column(String(100))  # search, sitemap, ai_analysis
+    page_title = Column(String(500))
+    page_description = Column(Text)
+```
+
+**SocialMediaData Model:**
+```python
+class SocialMediaData(Base):
+    __tablename__ = "social_media_data"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    competitor_id = Column(UUID(as_uuid=True), ForeignKey("competitors.id"))
+    
+    # Platform Information
+    platform = Column(String(50), nullable=False)  # linkedin, twitter, instagram, tiktok
+    profile_url = Column(String(500))
+    username = Column(String(200))
+    
+    # Metrics
+    followers_count = Column(Integer)
+    following_count = Column(Integer)
+    posts_count = Column(Integer)
+    engagement_rate = Column(Float)
+    
+    # Profile Data
+    profile_data = Column(JSON)  # Flexible storage for platform-specific data
+    recent_posts = Column(JSON)  # Recent posts with engagement metrics
+    
+    # Metadata
+    fetched_at = Column(DateTime(timezone=True), default=func.now())
+    fetch_status = Column(String(50), default="success")
 ```
 
 #### `src/database.py` - **Database Connection Management**
@@ -107,11 +176,90 @@ async with get_session() as session:
 
 ---
 
-### **🕷️ Flexible Scraping Module**
+### **🆕 Services Layer (NEW)**
+
+#### `src/services/url_discovery.py` - **Intelligent URL Discovery Service**
+**Purpose:** LangChain-powered automatic discovery of competitor URLs with reliable search APIs
+**Entry Point:** Used by URL discovery handler
+
+**Key Features:**
+- **Google Custom Search**: High-quality search results (100 free queries/day)
+- **Brave Search API**: Independent search index (2,000 free queries/month)
+- **Sitemap Analysis**: Automated sitemap parsing and categorization
+- **Confidence Scoring**: ML-based relevance assessment for discovered URLs
+- **Category Detection**: Automatic categorization (pricing, features, blog, social)
+- **AI Enhancement**: GPT-4 powered URL validation and metadata extraction
+
+**Core Class:**
+```python
+class URLDiscoveryService:
+    def __init__(self, openai_api_key: str, 
+                 google_cse_api_key: str = None,
+                 google_cse_id: str = None,
+                 brave_api_key: str = None):
+        self.llm = ChatOpenAI(model="gpt-4", api_key=openai_api_key)
+        self._init_search_tools()  # Initialize Google CSE and Brave Search
+        
+    async def discover_competitor_urls(self, competitor_name: str, base_url: str) -> List[DiscoveredURL]:
+        """Main discovery pipeline with reliable search backends"""
+        urls = []
+        urls.extend(await self._search_based_discovery(competitor_name))
+        urls.extend(await self._sitemap_analysis(base_url))
+        urls = await self._ai_enhance_urls(urls, competitor_name)
+        return self._deduplicate_and_score(urls)
+```
+
+**Discovery Methods:**
+- **Google Custom Search**: Premium quality search results with high reliability
+- **Brave Search API**: Independent search index with privacy focus
+- **Sitemap analysis**: Parses XML sitemaps for comprehensive URL discovery
+- **AI enhancement**: GPT-4 categorization and confidence scoring
+- **Social media detection**: Automatic social profile discovery
+- **Fallback mechanisms**: Intelligent failover between search backends
+
+#### `src/services/social_media.py` - **Social Media Integration Service**
+**Purpose:** Unified social media data fetching across multiple platforms
+**Entry Point:** Used by social media handler
+
+**Supported Platforms:**
+- **Twitter/X**: Official API v2 integration
+- **LinkedIn**: Unofficial API for company data
+- **Instagram**: Business account metrics
+- **TikTok**: Video performance and follower data
+
+**Core Class:**
+```python
+class SocialMediaFetcher:
+    def __init__(self, config: Dict[str, str]):
+        self.twitter_client = self._init_twitter(config)
+        self.linkedin_client = self._init_linkedin(config)
+        self.instagram_client = self._init_instagram(config)
+        self.tiktok_client = self._init_tiktok(config)
+    
+    async def fetch_all_platforms(self, competitor_id: str, social_urls: Dict[str, str]) -> Dict[str, Any]:
+        """Fetch data from all available platforms in parallel"""
+        tasks = []
+        for platform, url in social_urls.items():
+            if hasattr(self, f'fetch_{platform}'):
+                tasks.append(getattr(self, f'fetch_{platform}')(url))
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        return self._process_results(results)
+```
+
+**Features:**
+- **Parallel Processing**: Fetch from multiple platforms simultaneously
+- **Error Handling**: Graceful failure handling for API rate limits
+- **Data Standardization**: Unified data format across platforms
+- **Historical Tracking**: Store metrics over time for trend analysis
+
+---
+
+### **🕷️ Enhanced Scraping Module**
 
 #### `src/scrapers/` - **Scraping Architecture**
 **Purpose:** Modular scraping implementations with unified interface
-**Entry Point:** Used by `CompetitorScraper` in handlers
+**Entry Point:** Used by `EnhancedCompetitorScraper` in handlers
 
 **Key Components:**
 
@@ -130,16 +278,6 @@ async with get_session() as session:
 - **Smart Selectors**: Enhanced price and feature extraction
 - **Lambda Optimized**: Configured for serverless deployment
 
-**Configuration Options:**
-```python
-playwright_config = {
-    'headless': True,
-    'timeout': 30000,
-    'wait_time': 3000,
-    'viewport': {'width': 1920, 'height': 1080}
-}
-```
-
 #### `src/scrapers/scrapingbee_scraper.py` - **PAID API Service**
 **Purpose:** ScrapingBee API integration for premium scraping features
 **Key Features:**
@@ -147,16 +285,6 @@ playwright_config = {
 - **Advanced Anti-Bot**: Bypasses CAPTCHAs and detection systems
 - **Geographic Targeting**: Scrape from different countries
 - **High Reliability**: Enterprise-grade infrastructure
-
-**Configuration Options:**
-```python
-scrapingbee_config = {
-    'render_js': True,
-    'premium_proxy': True,
-    'country_code': 'US',
-    'wait': 3000
-}
-```
 
 #### `src/scrapers/factory.py` - **Scraper Factory & Auto-Detection**
 **Purpose:** Smart scraper selection and instantiation
@@ -166,184 +294,142 @@ scrapingbee_config = {
 - **Environment Parsing**: Reads `PREFERRED_SCRAPER` variable
 - **Easy Switching**: Runtime scraper selection
 
-**Factory Methods:**
-```python
-# Auto-detection
-scraper = ScraperFactory.create_scraper()
-
-# Explicit selection
-scraper = ScraperFactory.create_from_string("playwright")
-
-# Environment-based
-scraper = get_scraper_from_env()
-```
-
 ---
 
-### **⚡ Lambda Handlers (Main Entry Points)**
+### **⚡ Lambda Handlers (Enhanced Entry Points)**
 
 #### `src/handlers/competitor_management.py` - **🏢 Competitor CRUD Operations**
 **Entry Point:** API Gateway `/competitors` endpoints
 **HTTP Methods:** GET, POST, PUT, DELETE
 
-**Key Functions:**
-- **`create_competitor()`**: Add new competitor to track
-- **`get_competitors()`**: List all competitors for a user
-- **`get_competitor()`**: Retrieve specific competitor details
-- **`update_competitor()`**: Modify competitor information
-- **`delete_competitor()`**: Soft delete (deactivate) competitor
+**Enhanced with URL Discovery Integration:**
+- **`create_competitor()`**: Optionally trigger URL discovery on creation
+- **`get_competitors()`**: Include URL discovery status in responses
+- **`get_competitor()`**: Return discovered URLs and social media data
+- **URL discovery status tracking**: pending, in_progress, completed, failed
 
 **API Routes Handled:**
 ```
-POST   /competitors           # Create competitor
-GET    /competitors           # List competitors
-GET    /competitors/{id}      # Get specific competitor
+POST   /competitors           # Create competitor (with optional URL discovery)
+GET    /competitors           # List competitors (with discovery status)
+GET    /competitors/{id}      # Get competitor (with URLs and social data)
 PUT    /competitors/{id}      # Update competitor
 DELETE /competitors/{id}      # Delete competitor
 ```
 
-**Handler Function:**
-```python
-def handler(event, context):
-    # Routes HTTP methods to appropriate functions
-    # Handles CORS, authentication, error handling
-    # Returns standardized JSON responses
+#### `src/handlers/url_discovery.py` - **🔍 NEW: Intelligent URL Discovery**
+**Entry Point:** API Gateway `/competitors/{id}/discover-urls` and related endpoints
+
+**Key Functions:**
+- **`discover_urls()`**: Trigger URL discovery for a competitor
+- **`get_discovered_urls()`**: Retrieve discovered URLs with status
+- **`confirm_urls()`**: User confirmation workflow for discovered URLs
+- **`get_discovery_status()`**: Check discovery job status
+
+**API Routes Handled:**
+```
+POST   /competitors/{id}/discover-urls     # Trigger URL discovery
+GET    /competitors/{id}/urls              # List discovered URLs
+PUT    /competitors/{id}/urls              # Confirm/reject URLs
+GET    /competitors/{id}/urls/status       # Discovery status
 ```
 
-#### `src/handlers/scrape_competitor.py` - **🕷️ Flexible Web Scraping Engine**
-**Entry Point 1:** API Gateway `/scrape` endpoint (manual triggers)
+**Discovery Pipeline:**
+1. **Initialize Discovery**: Create discovery job record
+2. **URL Discovery**: Use LangChain service to find relevant URLs
+3. **Categorization**: Classify URLs by type (pricing, features, blog, social)
+4. **Confidence Scoring**: ML-based relevance assessment
+5. **User Confirmation**: Present URLs for user review
+6. **Status Tracking**: Monitor discovery progress and results
+
+#### `src/handlers/social_media.py` - **📱 NEW: Social Media Integration**
+**Entry Point:** API Gateway `/competitors/{id}/social-media` endpoints
+
+**Key Functions:**
+- **`fetch_social_data()`**: Fetch fresh social media data
+- **`get_social_data()`**: Retrieve stored social media metrics
+- **`fetch_platform_data()`**: Fetch data from specific platform
+- **`get_social_trends()`**: Analyze historical social media trends
+
+**API Routes Handled:**
+```
+GET    /competitors/{id}/social-media                # Get stored social data
+POST   /competitors/{id}/social-media               # Fetch fresh social data
+POST   /competitors/{id}/social-media/{platform}    # Fetch specific platform
+GET    /competitors/{id}/social-media/trends        # Historical trends
+```
+
+**Social Media Pipeline:**
+1. **Platform Detection**: Identify social media URLs from discovered URLs
+2. **Parallel Fetching**: Fetch data from multiple platforms simultaneously
+3. **Data Standardization**: Normalize data across different platforms
+4. **Historical Storage**: Store metrics for trend analysis
+5. **Error Handling**: Graceful handling of API rate limits and errors
+
+#### `src/handlers/scrape_competitor.py` - **🕷️ Enhanced Web Scraping Engine**
+**Entry Point 1:** API Gateway `/competitors/{id}/scrape-*` endpoints
 **Entry Point 2:** CloudWatch Events (scheduled scraping every 6 hours)
 
-**🎯 Flexible Scraping Architecture:**
-The system now supports **multiple scraping implementations** that can be switched without code changes:
-
-**Scraping Implementations:**
-- **🎭 Playwright (FREE)**: Full JavaScript support, no API costs
-- **🐝 ScrapingBee (PAID)**: Premium proxy rotation, anti-bot features
+**🎯 Enhanced Scraping Architecture:**
+The system now supports **URL-category-aware scraping** with the new `EnhancedCompetitorScraper` class:
 
 **Key Classes & Functions:**
-- **`CompetitorScraper`**: Flexible wrapper supporting multiple scraper backends
-- **`scrape_single_competitor()`**: Scrape individual competitor using chosen implementation
-- **`scrape_all_active_competitors()`**: Batch scraping operation
+- **`EnhancedCompetitorScraper`**: URL discovery integration with category-aware scraping
+- **`scrape_all_competitor_urls()`**: Scrape all confirmed URLs for a competitor
+- **`scrape_by_category()`**: Scrape URLs of specific category (pricing, features, blog)
+- **`scrape_discovered_url()`**: Scrape individual discovered URL with context
 
-**Auto-Detection Logic:**
-The system automatically chooses the best scraper based on:
-1. `PREFERRED_SCRAPER` environment variable
-2. Available API keys (ScrapingBee)
-3. Fallback to Playwright (free) if no preference set
-
-**Usage Examples:**
-```python
-# Auto-detection (recommended)
-async with CompetitorScraper() as scraper:
-    result = await scraper.scrape_url(url, competitor_name)
-
-# Force specific scraper
-async with CompetitorScraper("playwright") as scraper:  # FREE
-    result = await scraper.scrape_url(url, competitor_name)
-
-async with CompetitorScraper("scrapingbee") as scraper:  # PAID
-    result = await scraper.scrape_url(url, competitor_name)
+**Enhanced API Routes:**
+```
+POST   /competitors/{id}/scrape-all         # Scrape all confirmed URLs
+POST   /competitors/{id}/scrape-category    # Scrape specific URL category
+POST   /competitors/{id}/scrape-discovered  # Scrape specific discovered URL
 ```
 
-**Environment Configuration:**
-```bash
-PREFERRED_SCRAPER=auto              # Auto-detect (default)
-PREFERRED_SCRAPER=playwright        # Force free Playwright
-PREFERRED_SCRAPER=scrapingbee       # Force paid ScrapingBee
-SCRAPINGBEE_API_KEY=your_key        # Required for ScrapingBee
-```
+**Enhanced Scraping Pipeline:**
+1. **URL Selection**: Choose URLs based on category and confirmation status
+2. **Context-Aware Scraping**: Different strategies for pricing vs. blog pages
+3. **Batch Processing**: Efficiently scrape multiple URLs
+4. **Enhanced Metadata**: Rich context about scraped data and source URLs
+5. **Error Handling**: Fallback logic and retry mechanisms
 
-**Scraping Pipeline:**
-1. **Scraper Selection**: Auto-detect or use specified scraper type
-2. **URL Fetching**: 
-   - Playwright: Browser automation with full JS support
-   - ScrapingBee: API service with proxy rotation
-3. **HTML Parsing**: BeautifulSoup with intelligent selectors
-4. **Data Extraction**: Pricing, features, metadata_ using enhanced selectors
-5. **Storage**: Save results with scraper metadata_ and performance metrics
-6. **Error Handling**: Fallback logic and retry mechanisms
-
-**Event Formats:**
-```python
-# Manual scrape
-{"competitor_id": "uuid"}
-
-# Scrape all active
-{"action": "scrape_all"}
-
-# Scheduled (from CloudWatch)
-{"action": "scheduled_scrape"}
-```
-
-**Cost Comparison:**
-| Feature | Playwright | ScrapingBee |
-|---------|------------|-------------|
-| **Cost** | FREE | $29-199/month |
-| **JavaScript** | ✅ Full | ✅ Full |
-| **Memory** | 1GB | 512MB |
-| **Proxy Rotation** | ❌ | ✅ Professional |
-| **Anti-Bot Bypass** | ⚠️ Basic | ✅ Advanced |
-
-#### `src/handlers/battle_card.py` - **⚔️ AI Battle Card Generation**
+#### `src/handlers/battle_card.py` - **⚔️ Enhanced AI Battle Card Generation**
 **Entry Point:** API Gateway `/battle-card` endpoint
 
-**Key Classes & Functions:**
-- **`BattleCardGenerator`**: LangChain + GPT-4 integration
-- **`generate_battle_card()`**: Create AI-powered competitive analysis
-- **`get_battle_card()`**: Retrieve existing battle card
-- **`list_battle_cards()`**: List user's battle cards
+**Enhanced with URL Discovery Data:**
+- **Richer Context**: Uses discovered URLs and social media data
+- **Category-Specific Analysis**: Pricing vs. feature comparison insights
+- **Social Intelligence**: Incorporates social media metrics and trends
+- **Enhanced Prompts**: More comprehensive competitive analysis
 
-**AI Generation Pipeline:**
-1. **Data Aggregation**: Collect competitor data and scrape results
-2. **Prompt Engineering**: Build context-rich prompts for GPT-4
-3. **AI Processing**: Generate structured battle card content
-4. **Post-processing**: Format, validate, and store results
-5. **Metadata Tracking**: Token usage, costs, model versions
-
-**Battle Card Structure:**
+**Enhanced Battle Card Structure:**
 - Executive Summary
 - Competitive Positioning Matrix
-- Pricing Comparison & Analysis
-- Feature Gaps & Advantages
+- Comprehensive Pricing Analysis (from discovered pricing pages)
+- Feature Gaps & Advantages (from discovered feature pages)
+- Content Strategy Analysis (from discovered blog pages)
+- Social Media Presence Comparison
 - Sales Objection Handling
 - Win/Loss Factors
 - Recommended Messaging
 
-**Event Formats:**
-```python
-# Generate new battle card
-{"action": "generate", "user_id": "uuid", "competitor_ids": ["uuid1", "uuid2"]}
-
-# Retrieve existing card
-{"action": "get", "user_id": "uuid", "battle_card_id": "uuid"}
-
-# List all cards
-{"action": "list", "user_id": "uuid", "limit": 20}
-```
-
-#### `src/handlers/migrations.py` - **🔄 Database Management**
+#### `src/handlers/migrations.py` - **🔄 Enhanced Database Management**
 **Entry Point:** Manual Lambda invocation for database operations
 
-**Key Functions:**
-- **`run_migrations()`**: Create database schema and tables
-- **`create_test_user()`**: Initialize test data for development
-- **Health check functions**: Verify database connectivity
-
-**Usage Scenarios:**
-- Initial deployment setup
-- Database schema updates
-- Development environment setup
-- Production health monitoring
+**Enhanced Functions:**
+- **`run_migrations()`**: Create enhanced database schema with new tables
+- **`create_test_user()`**: Initialize test data including discovered URLs
+- **`migrate_existing_data()`**: Migrate existing competitors to new schema
+- **Health check functions**: Verify database connectivity and new tables
 
 ---
 
 ### **🔧 Configuration & Setup**
 
-#### `src/requirements.txt` - **Python Dependencies**
+#### `src/requirements.txt` - **Enhanced Python Dependencies**
 **Purpose:** Defines all Python packages required by Lambda functions
 
-**Key Dependencies:**
+**Enhanced Dependencies:**
 ```txt
 # Database
 sqlalchemy==2.0.23      # Async ORM
@@ -352,23 +438,59 @@ asyncpg==0.29.0         # PostgreSQL async driver
 # Web Scraping
 beautifulsoup4==4.12.2  # HTML parsing
 aiohttp==3.9.1          # Async HTTP client
+playwright==1.40.0      # Browser automation
 
-# AI/ML
+# AI/ML & Search
 langchain==0.0.350      # LLM framework
 openai==1.3.7           # GPT-4 integration
+duckduckgo-search==3.9.6 # Web search for URL discovery
+
+# Social Media APIs
+tweepy==4.14.0          # Twitter API
+linkedin-api==2.0.0     # LinkedIn (unofficial)
+instagrapi==2.0.0       # Instagram (unofficial)
+TikTokApi==5.3.0        # TikTok API
+
+# URL Processing
+validators==0.22.0      # URL validation
+requests-html==0.10.0   # Advanced web scraping
+sitemap-parser==0.6.3   # Sitemap parsing
 
 # AWS
 boto3==1.34.0           # AWS SDK
 ```
 
-#### `env.example` - **Environment Configuration Template**
+#### `env.example` - **Enhanced Environment Configuration Template**
 **Purpose:** Template for local development environment variables
 
-**Key Variables:**
+**Enhanced Variables:**
 ```bash
+# Database
 DATABASE_URL="postgresql+asyncpg://..."  # Database connection
+
+# Scraping (Choose your option)
+PREFERRED_SCRAPER="playwright"     # Free option
+PREFERRED_SCRAPER="scrapingbee"    # Paid option  
+PREFERRED_SCRAPER="auto"           # Smart detection
+
+# Core API Keys
 OPENAI_API_KEY="sk-..."                 # GPT-4 access
-SCRAPINGBEE_API_KEY="..."               # Web scraping service
+SCRAPINGBEE_API_KEY="..."               # Web scraping service (optional)
+
+# 🆕 NEW: URL Discovery
+SERPAPI_KEY="your-serpapi-key"                    # Optional for enhanced search
+LANGCHAIN_SEARCH_RESULTS_LIMIT="10"              # Search result limit
+URL_DISCOVERY_CONFIDENCE_THRESHOLD="0.7"         # Confidence threshold
+
+# 🆕 NEW: Social Media APIs
+TWITTER_BEARER_TOKEN="your_twitter_bearer_token"
+LINKEDIN_EMAIL="your_linkedin_email"             # For unofficial API
+LINKEDIN_PASSWORD="your_linkedin_password"       # For unofficial API
+INSTAGRAM_USERNAME="your_instagram_username"     # For unofficial API
+INSTAGRAM_PASSWORD="your_instagram_password"     # For unofficial API
+TIKTOK_ACCESS_TOKEN="your_tiktok_access_token"
+
+# Environment
 ENVIRONMENT="dev"                       # Deployment environment
 ```
 
@@ -407,154 +529,171 @@ ENVIRONMENT="dev"                       # Deployment environment
 - CloudFormation output parsing
 - Post-deployment instructions
 
-**Usage Examples:**
-```bash
-./scripts/deploy.sh --guided                    # Interactive setup
-./scripts/deploy.sh --stack-name my-stack       # Direct deployment
-```
-
 #### `scripts/test_local.py` - **Local Testing Framework**
 **Purpose:** Comprehensive testing and validation for local setup
 **Entry Point:** `python scripts/test_local.py`
 
-**Test Coverage:**
+**Enhanced Test Coverage:**
 - Database connectivity
-- Migration execution
+- Migration execution (including new tables)
 - User creation
 - Competitor management
+- URL discovery service
+- Social media integration
 - Handler initialization
 - Data cleanup
 
-**Test Output:**
-```
-✅ Database Connection      PASS
-✅ Database Migrations      PASS
-✅ Test User Creation       PASS
-✅ Competitor Management    PASS
-✅ Scraping Handler        PASS
-✅ Battle Card Handler     PASS
-```
+#### `scripts/test_url_discovery.py` - **🆕 NEW: URL Discovery Testing**
+**Purpose:** Comprehensive testing of URL discovery and social media features
+**Entry Point:** `python scripts/test_url_discovery.py`
+
+**Test Coverage:**
+- URL discovery service functionality
+- Social media API integration
+- Database model creation and relationships
+- Handler integration testing
+- End-to-end workflow validation
 
 ---
 
-## 🎯 Feature Entry Points Summary
+## 🎯 Enhanced Feature Entry Points Summary
 
-### **1. Competitor Management**
+### **1. Competitor Management (Enhanced)**
 - **Primary Entry:** `GET/POST/PUT/DELETE /competitors`
 - **Handler:** `src/handlers/competitor_management.py`
-- **Core Logic:** CRUD operations with user isolation
-- **Database:** `Competitor` model in `src/models.py`
+- **Core Logic:** CRUD operations with URL discovery integration
+- **Database:** `Competitor`, `CompetitorUrl`, `SocialMediaData` models
 
-### **2. Web Scraping**
-- **Primary Entry:** `POST /scrape` or CloudWatch scheduled events
+### **2. 🆕 URL Discovery System**
+- **Primary Entry:** `POST /competitors/{id}/discover-urls`
+- **Handler:** `src/handlers/url_discovery.py`
+- **Service:** `src/services/url_discovery.py`
+- **Core Logic:** LangChain-powered intelligent URL discovery with confidence scoring
+- **Database:** `CompetitorUrl` model with status tracking
+
+### **3. 🆕 Social Media Integration**
+- **Primary Entry:** `GET/POST /competitors/{id}/social-media`
+- **Handler:** `src/handlers/social_media.py`
+- **Service:** `src/services/social_media.py`
+- **Core Logic:** Multi-platform social media data fetching and analysis
+- **Database:** `SocialMediaData` model with metrics tracking
+
+### **4. Enhanced Web Scraping**
+- **Primary Entry:** `POST /competitors/{id}/scrape-*` or CloudWatch scheduled events
 - **Handler:** `src/handlers/scrape_competitor.py`
-- **Core Logic:** ScrapingBee API + BeautifulSoup parsing
-- **Database:** `ScrapeResult` and `ScrapeJob` models
+- **Core Logic:** Category-aware scraping with URL discovery integration
+- **Database:** Enhanced `ScrapeResult` and `ScrapeJob` models
 
-### **3. AI Battle Cards**
+### **5. Enhanced AI Battle Cards**
 - **Primary Entry:** `POST /battle-card`
 - **Handler:** `src/handlers/battle_card.py`
-- **Core Logic:** LangChain + GPT-4 competitive analysis
-- **Database:** `BattleCard` model with JSONB content
+- **Core Logic:** GPT-4 analysis with discovered URLs and social media data
+- **Database:** Enhanced `BattleCard` model with richer context
 
-### **4. Database Management**
+### **6. Database Management (Enhanced)**
 - **Primary Entry:** Direct Lambda invocation
 - **Handler:** `src/handlers/migrations.py`
-- **Core Logic:** Schema creation and data seeding
-- **Database:** All models in `src/models.py`
+- **Core Logic:** Schema creation with new tables and data migration
+- **Database:** All enhanced models in `src/models.py`
 
 ---
 
-## 🔄 Data Flow Diagrams
+## 🔄 Enhanced Data Flow Diagrams
 
-### **Scraping Flow**
+### **URL Discovery Flow**
 ```
-CloudWatch Event → Lambda → ScrapingBee API → BeautifulSoup → PostgreSQL
-      ↓              ↓            ↓               ↓              ↓
-  Schedule    Extract URL    Fetch HTML     Parse Data    Store Results
-```
-
-### **Battle Card Generation Flow**
-```
-API Request → Lambda → Database Query → GPT-4 API → Format Response → Store & Return
-     ↓         ↓           ↓              ↓            ↓               ↓
-  User Input  Validate   Get Competitor   Generate     Process        Save Card
-                        History          Analysis     Markdown
+API Request → Lambda → LangChain Service → DuckDuckGo Search → AI Analysis → Database Storage
+     ↓         ↓            ↓                    ↓               ↓              ↓
+User Trigger  Validate   Search Web        Parse Results   Categorize     Store URLs
+             Request     + Sitemap           + Score       + Confidence   + Metadata
 ```
 
-### **Competitor Management Flow**
+### **Social Media Flow**
 ```
-API Gateway → Lambda → Input Validation → Database Operation → JSON Response
-     ↓         ↓            ↓                    ↓                ↓
-  HTTP Req   Route      Check User Auth      CRUD Action      Success/Error
+API Request → Lambda → Social Media Service → Platform APIs → Data Processing → Database Storage
+     ↓         ↓              ↓                    ↓              ↓               ↓
+User Trigger  Route      Parallel Fetch       API Responses   Standardize    Historical
+             Platform    (Twitter, LinkedIn)   + Rate Limits   Format         Tracking
+```
+
+### **Enhanced Scraping Flow**
+```
+Trigger → URL Selection → Scraper Factory → Content Extraction → Enhanced Storage
+   ↓           ↓              ↓                  ↓                  ↓
+Schedule    Category        Auto-detect       Category-aware    Metadata +
+Event       Filter         Best Scraper      Parsing Logic     Source URLs
 ```
 
 ---
 
-## 🔌 Integration Points
+## 🔌 Enhanced Integration Points
 
 ### **External APIs**
+- **OpenAI GPT-4**: `https://api.openai.com/v1/`
+  - Used in: `src/services/url_discovery.py`, `src/handlers/battle_card.py`
+  - Purpose: AI-powered URL discovery and competitive analysis
+
+- **Google Custom Search API**: `https://www.googleapis.com/customsearch/v1`
+  - Used in: `src/services/url_discovery.py`
+  - Purpose: High-quality web search for URL discovery (100 free/day)
+
+- **Brave Search API**: `https://api.search.brave.com/res/v1/web/search`
+  - Used in: `src/services/url_discovery.py`
+  - Purpose: Independent web search for URL discovery (2,000 free/month)
+
+- **Social Media APIs**:
+  - **Twitter API v2**: Official API for follower and engagement metrics
+  - **LinkedIn**: Unofficial API for company data
+  - **Instagram**: Business account metrics
+  - **TikTok**: Video performance data
+
 - **ScrapingBee**: `https://app.scrapingbee.com/api/v1/`
   - Used in: `src/handlers/scrape_competitor.py`
-  - Purpose: Web scraping with proxy and JS rendering
-  
-- **OpenAI GPT-4**: `https://api.openai.com/v1/`
-  - Used in: `src/handlers/battle_card.py`
-  - Purpose: AI-powered competitive analysis
+  - Purpose: Premium web scraping with anti-bot features
 
-### **AWS Services**
-- **API Gateway**: RESTful API endpoints
-- **Lambda**: Serverless function execution
-- **RDS PostgreSQL**: Managed database service
-- **CloudWatch**: Logging and scheduled events
-- **VPC**: Network isolation and security
-
-### **Database Connections**
-- **Async Engine**: SQLAlchemy 2.0 with asyncpg driver
-- **Connection Pooling**: Optimized for Lambda cold starts
-- **Session Management**: Context managers for proper cleanup
+### **Enhanced AWS Services**
+- **API Gateway**: Enhanced with new URL discovery and social media endpoints
+- **Lambda**: Additional functions for URL discovery and social media
+- **RDS PostgreSQL**: Enhanced schema with new tables
+- **CloudWatch**: Enhanced logging and scheduled events
 
 ---
 
-## 🛠️ Development Workflow
+## 🛠️ Enhanced Development Workflow
 
 ### **Adding New Features**
-1. **Define Model**: Add to `src/models.py`
-2. **Create Handler**: New file in `src/handlers/`
-3. **Update Template**: Add Lambda function to `template.yaml`
-4. **Add Tests**: Extend `scripts/test_local.py`
-5. **Deploy**: Use `scripts/deploy.sh`
+1. **Define Enhanced Models**: Update `src/models.py` with new tables/relationships
+2. **Create Services**: Add business logic to `src/services/`
+3. **Create/Update Handlers**: Add/modify files in `src/handlers/`
+4. **Update Template**: Add Lambda functions and API routes to `template.yaml`
+5. **Add Tests**: Extend testing scripts
+6. **Deploy**: Use `scripts/deploy.sh`
 
-### **Modifying Existing Features**
-1. **Update Handler**: Modify business logic
-2. **Database Changes**: Update models and run migrations
-3. **Test Locally**: Run `scripts/test_local.py`
-4. **Deploy Changes**: Use `sam deploy`
-
-### **Debugging Issues**
-1. **Local**: Check Docker logs and database connections
-2. **AWS**: Use CloudWatch logs and SAM CLI tools
-3. **Database**: Connect directly to verify data integrity
+### **Testing New Features**
+1. **URL Discovery**: Run `python scripts/test_url_discovery.py`
+2. **Social Media**: Test individual platform integrations
+3. **Enhanced Scraping**: Test category-aware scraping
+4. **Integration**: Run full workflow tests
 
 ---
 
-## 📊 Monitoring & Observability
+## 📊 Enhanced Monitoring & Observability
 
-### **Log Locations**
-- **Local Development**: Docker Compose logs
-- **AWS Lambda**: CloudWatch Logs groups
-- **Database**: RDS logs and performance insights
+### **New Log Sources**
+- **URL Discovery Service**: LangChain and AI-powered search logs
+- **Social Media Service**: Platform API interaction and rate limit logs
+- **Enhanced Scraping**: Category-aware scraping and URL metadata logs
 
-### **Health Checks**
-- **Database**: Connection validation in `src/database.py`
-- **API**: Response status codes and error handling
-- **External APIs**: Rate limiting and error handling
+### **New Health Checks**
+- **URL Discovery Status**: Monitor discovery job progress and success rates
+- **Social Media APIs**: Track API rate limits and authentication status
+- **Enhanced Database**: Verify new table integrity and relationships
 
-### **Performance Metrics**
-- **Lambda Duration**: Function execution time
-- **Database Queries**: Query performance and connection pooling
-- **API Response Times**: End-to-end request processing
+### **New Performance Metrics**
+- **URL Discovery Time**: Time to discover and categorize URLs
+- **Social Media Fetch Speed**: Multi-platform data retrieval performance
+- **Enhanced Scraping Efficiency**: Category-specific scraping performance
 
 ---
 
-This documentation provides a complete technical overview of the system architecture, file purposes, and feature entry points. Each component is designed to be modular, testable, and maintainable while following serverless best practices. 
+This enhanced documentation provides a complete technical overview of the system with all new URL discovery and social media features integrated. The architecture now supports intelligent competitor analysis with automated URL discovery, comprehensive social media tracking, and enhanced AI-powered insights. 
