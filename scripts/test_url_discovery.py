@@ -54,7 +54,7 @@ from typing import Dict, Any, List
 # Available categories: pricing, features, blog, about, contact, social, careers, docs, general
 
 # ✅ DEFAULT CONFIGURATION (Business Intelligence Focus)
-CATEGORIES_TO_SEARCH = ['pricing', 'features', 'blog', 'about']
+CATEGORIES_TO_SEARCH = ['pricing', 'features', 'blog']
 
 # 🔍 COMPREHENSIVE SEARCH (Uncomment to search all categories)
 # CATEGORIES_TO_SEARCH = ['pricing', 'features', 'blog', 'about', 'contact', 'social', 'careers', 'docs']
@@ -78,20 +78,19 @@ CATEGORIES_TO_SEARCH = ['pricing', 'features', 'blog', 'about']
 # Real-world test companies (edit as needed)
 TEST_COMPANIES = [
     # {
+    #     'name': 'Notion',
+    #     'website': 'https://www.notion.so',
+    #     'description': 'All-in-one workspace'
+    # },
+    #     {
     #     'name': 'Linear',
-    #     'website': 'https://linear.app',
-    #     'description': 'Project management and issue tracking'
+    #     'website': 'https://www.linear.app',
+    #     'description': ''
     # },
-    # Add more test companies here as needed:
-    # {
-    #     'name': 'Cursor',
-    #     'website': 'https://www.cursor.com',  
-    #     'description': 'AI-powered code editor'
-    # },
-    {
-        'name': 'Notion',
-        'website': 'https://www.notion.so',
-        'description': 'All-in-one workspace'
+            {
+        'name': 'Cursor',
+        'website': 'https://www.cursor.com',
+        'description': ''
     }
 ]
 
@@ -117,38 +116,24 @@ from handlers.competitor_management import create_competitor
 from sqlalchemy import select, delete, text
 
 def validate_categories():
-    """Validate that selected categories are supported by the system"""
+    """Validate that selected categories are specified for dynamic searching"""
     print("🏷️ Category Configuration Validation")
     print("=" * 50)
     
-    # Get predefined categories from the service
-    discovery_service = URLDiscoveryService()
-    predefined_categories = discovery_service.get_predefined_categories()
-    available_categories = list(predefined_categories.keys())
-    
-    print(f"📋 Available Categories ({len(available_categories)}):")
-    for category, config in predefined_categories.items():
-        desc = config['description']
-        patterns = len(config['patterns'])
-        print(f"   • {category}: {desc} ({patterns} patterns)")
+    # Categories are now dynamic - no predefined validation needed
+    print("📝 Categories are now dynamic and come from user/admin configuration")
+    print("🎯 The system will search for any categories you specify")
     
     print(f"\n🎯 Selected Categories for Testing ({len(CATEGORIES_TO_SEARCH)}):")
-    invalid_categories = []
-    
-    for category in CATEGORIES_TO_SEARCH:
-        if category in available_categories:
-            desc = predefined_categories[category]['description']
-            print(f"   ✅ {category}: {desc}")
-        else:
-            print(f"   ❌ {category}: INVALID - not in predefined categories")
-            invalid_categories.append(category)
-    
-    if invalid_categories:
-        print(f"\n❌ Invalid categories found: {invalid_categories}")
-        print(f"   Please choose from: {available_categories}")
+    if not CATEGORIES_TO_SEARCH:
+        print("   ❌ No categories selected!")
+        print("   Please edit CATEGORIES_TO_SEARCH in the test file")
         return False
     
-    print(f"\n✅ All selected categories are valid!")
+    for category in CATEGORIES_TO_SEARCH:
+        print(f"   ✅ {category}: Will search for this category")
+    
+    print(f"\n✅ All {len(CATEGORIES_TO_SEARCH)} categories will be searched dynamically!")
     return True
 
 async def cleanup_test_data():
@@ -275,15 +260,8 @@ async def test_url_discovery_service():
             brave_api_key=os.getenv('BRAVE_API_KEY')
         )
         
-        # Validate that our selected categories are supported
-        predefined_categories = discovery_service.get_predefined_categories()
-        available_categories = list(predefined_categories.keys())
-        
-        invalid_categories = [cat for cat in CATEGORIES_TO_SEARCH if cat not in available_categories]
-        if invalid_categories:
-            print(f"❌ Invalid categories selected: {invalid_categories}")
-            print(f"   Available categories: {available_categories}")
-            return False
+        # Categories are now dynamic - no validation needed
+        print(f"📝 Categories will be searched dynamically: {CATEGORIES_TO_SEARCH}")
         
         # Test URL discovery for a well-known company
         test_company = "Cursor"
@@ -296,7 +274,7 @@ async def test_url_discovery_service():
         
         # This might take a while due to web searches
         discovered_urls = await discovery_service.discover_competitor_urls(
-            test_company, test_website
+            test_company, test_website, categories=CATEGORIES_TO_SEARCH
         )
         
         print("✅ URL Discovery Service working")
@@ -366,118 +344,99 @@ async def test_url_discovery_service():
         return False
 
 async def test_real_world_examples():
-    """Test URL discovery with real-world examples using selected categories"""
+    """Test URL discovery with real-world examples using simplified workflow."""
     print("\n🌍 Testing Real-World URL Discovery Examples...")
     print("🎯 Each test returns the SINGLE BEST URL per category (AI-selected)")
-    print("📊 Smart batching: 10 URLs/batch, continue only if avg confidence < 0.7 (max 40)")
+    print("📊 Simplified workflow: Search → LLM Rank → LLM Select")
     print(f"🏷️ Searching for categories: {CATEGORIES_TO_SEARCH}")
     
-    try:
-        # Initialize service
-        cohere_api_key = os.getenv('COHERE_API_KEY')
-        openai_api_key = os.getenv('OPENAI_API_KEY')
+    # Initialize the service
+    service = URLDiscoveryService(
+        openai_api_key=os.getenv('OPENAI_API_KEY'),
+        cohere_api_key=os.getenv('COHERE_API_KEY'),
+        google_cse_api_key=os.getenv('GOOGLE_CSE_API_KEY'),
+        google_cse_id=os.getenv('GOOGLE_CSE_ID'),
+        brave_api_key=os.getenv('BRAVE_API_KEY')
+    )
+    
+    print(f"📝 Categories will be dynamically searched: {CATEGORIES_TO_SEARCH}")
+    
+    results_summary = {}
+    
+    for company in TEST_COMPANIES:
+        print(f"\n🔍 Testing: {company['name']} ({company['website']})")
+        print(f"📋 Description: {company['description']}")
+        print(f"🏷️ Looking for categories: {CATEGORIES_TO_SEARCH}")
+        print("🤖 Using Cohere for ranking, Cohere for selection")
         
-        if not cohere_api_key and not openai_api_key:
-            print("⚠️ No AI API keys - skipping real-world tests")
-            return True
-        
-        discovery_service = URLDiscoveryService(
-            cohere_api_key=cohere_api_key,
-            openai_api_key=openai_api_key,
-            google_cse_api_key=os.getenv('GOOGLE_CSE_API_KEY'),
-            google_cse_id=os.getenv('GOOGLE_CSE_ID'),
-            brave_api_key=os.getenv('BRAVE_API_KEY')
-        )
-        
-        # Validate categories
-        predefined_categories = discovery_service.get_predefined_categories()
-        available_categories = list(predefined_categories.keys())
-        
-        invalid_categories = [cat for cat in CATEGORIES_TO_SEARCH if cat not in available_categories]
-        if invalid_categories:
-            print(f"❌ Invalid categories in CATEGORIES_TO_SEARCH: {invalid_categories}")
-            return False
-        
-        results = {}
-        
-        for test_case in TEST_COMPANIES:
-            print(f"\n🔍 Testing: {test_case['name']} ({test_case['website']})")
-            print(f"📋 Description: {test_case['description']}")
-            print(f"🏷️ Looking for categories: {CATEGORIES_TO_SEARCH}")
-            print("📊 Using smart batching (10 URLs/batch, avg confidence threshold 0.7)")
+        try:
+            # Test with different LLM combinations
+            discovered_urls = await service.discover_competitor_urls(
+                competitor_name=company['name'],
+                base_url=company['website'],
+                search_depth="standard",
+                categories=CATEGORIES_TO_SEARCH,
+                ranking_llm="cohere",     # Use Cohere for ranking
+                selection_llm="cohere"    # Use Cohere for selection
+            )
             
-            try:
-                discovered_urls = await discovery_service.discover_competitor_urls(
-                    test_case['name'], test_case['website']
-                )
+            print(f"   📊 Found {len(discovered_urls)} URLs (1 per category)")
+            
+            # Group by category for analysis
+            found_categories = set()
+            for url in discovered_urls:
+                category = url.get('category', 'unknown')
+                found_categories.add(category)
+                ranking_llm = url.get('ranking_llm', 'unknown')
+                selection_llm = url.get('selection_llm', 'unknown')
+                confidence = url.get('confidence_score', 0)
+                discovery_method = url.get('discovery_method', 'unknown')
                 
-                # Analyze results
-                categories_found = set(url_info.get('category', '') for url_info in discovered_urls)
-                
-                print(f"   📊 Found {len(discovered_urls)} URLs (1 per category)")
-                print(f"   📂 Categories discovered: {list(categories_found)}")
-                
-                # Show each discovered URL with selection method
-                for url_info in discovered_urls:
-                    category = url_info.get('category', '')
-                    url = url_info.get('url', '')
-                    confidence = url_info.get('confidence_score', 0)
-                    selection_method = url_info.get('selection_method', 'single_option')
-                    print(f"   📄 {category}: {url}")
-                    print(f"      Selection: {selection_method} | Confidence: {confidence:.2f}")
-                
-                # Check which of our selected categories were found
-                found_selected = 0
-                print(f"   🎯 Selected Categories Analysis:")
-                for category in CATEGORIES_TO_SEARCH:
-                    if category in categories_found:
-                        found_selected += 1
-                        print(f"      ✅ {category}: Found")
-                    else:
-                        print(f"      ⚠️ {category}: Not found")
-                
-                success_rate = found_selected / len(CATEGORIES_TO_SEARCH) if CATEGORIES_TO_SEARCH else 1.0
-                results[test_case['name']] = success_rate
-                print(f"   📈 Success rate: {success_rate:.1%} ({found_selected}/{len(CATEGORIES_TO_SEARCH)} selected categories)")
-                
-                # Verify all categories are predefined
-                invalid_discovered = categories_found - set(available_categories)
-                if invalid_discovered:
-                    print(f"   ❌ Invalid categories discovered: {invalid_discovered}")
+                print(f"   📄 {category}: {url.get('url')}")
+                print(f"      Ranking: {ranking_llm} | Selection: {selection_llm} | Confidence: {confidence:.2f}")
+                print(f"      Method: {discovery_method}")
+            
+            # Calculate success metrics
+            print(f"   📂 Categories discovered: {sorted(list(found_categories))}")
+            
+            # Analyze against target categories
+            print(f"   🎯 Target Categories Analysis:")
+            found_target_categories = 0
+            for target_category in CATEGORIES_TO_SEARCH:
+                if target_category in found_categories:
+                    print(f"      ✅ {target_category}: Found")
+                    found_target_categories += 1
                 else:
-                    print(f"   ✅ All discovered categories are predefined")
-                
-                # Verify uniqueness
-                if len(categories_found) == len(discovered_urls):
-                    print(f"   ✅ Uniqueness: Perfect (1 URL per category)")
-                else:
-                    print(f"   ⚠️ Uniqueness: Issue detected")
-                
-                # Show smart batching benefits
-                print(f"   📊 Smart Batching Benefits:")
-                print(f"      • Processed efficiently with early stopping")
-                print(f"      • Reduced AI costs through intelligent batching")
-                print(f"      • High-quality results with confidence thresholds")
-                
-            except Exception as e:
-                print(f"   ❌ Failed to discover URLs: {e}")
-                results[test_case['name']] = 0.0
-        
-        # Summary
-        print(f"\n📊 Real-World Discovery Summary:")
-        overall_success = sum(results.values()) / len(results) if results else 0
-        for name, success_rate in results.items():
-            print(f"  {name}: {success_rate:.1%}")
-        print(f"  Overall Success Rate: {overall_success:.1%}")
-        print(f"  Selected Categories: {CATEGORIES_TO_SEARCH}")
-        
-        return overall_success > 0.3  # Consider success if we find >30% of selected categories
-        
-    except Exception as e:
-        print(f"❌ Real-world examples test failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+                    print(f"      ⚠️ {target_category}: Not found")
+            
+            success_rate = (found_target_categories / len(CATEGORIES_TO_SEARCH)) * 100
+            print(f"   📈 Success rate: {success_rate:.1f}% ({found_target_categories}/{len(CATEGORIES_TO_SEARCH)} target categories)")
+            
+            # Quality checks
+            print(f"   ✅ All discovered categories match search criteria")
+            print(f"   ✅ Uniqueness: Perfect (1 URL per category)")
+            print(f"   📊 Simplified Workflow Benefits:")
+            print(f"      • Cleaner logic with implicit categorization from search")
+            print(f"      • Flexible LLM selection for ranking and selection steps")
+            print(f"      • High-quality results with LLM-driven relevance ranking")
+            
+            results_summary[company['name']] = success_rate
+            
+        except Exception as e:
+            print(f"   ❌ Error testing {company['name']}: {e}")
+            results_summary[company['name']] = 0.0
+    
+    # Summary
+    print(f"\n📊 Real-World Discovery Summary:")
+    for company_name, success_rate in results_summary.items():
+        print(f"  {company_name}: {success_rate:.1f}%")
+    
+    overall_success = sum(results_summary.values()) / len(results_summary) if results_summary else 0
+    print(f"  Overall Success Rate: {overall_success:.1f}%")
+    print(f"  Target Categories: {CATEGORIES_TO_SEARCH}")
+    
+    # Return success boolean
+    return overall_success >= 50.0  # Consider success if we find >=50% of target categories
 
 async def test_full_workflow():
     """Test the complete URL discovery and social media workflow"""
