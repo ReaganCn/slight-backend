@@ -77,11 +77,11 @@ CATEGORIES_TO_SEARCH = ['pricing', 'features', 'blog']
 
 # Real-world test companies (edit as needed)
 TEST_COMPANIES = [
-    {
-        'name': 'Notion',
-        'website': 'https://www.notion.so',
-        'description': 'All-in-one workspace'
-    },
+    # {
+    #     'name': 'Notion',
+    #     'website': 'https://www.notion.so',
+    #     'description': 'All-in-one workspace'
+    # },
     #     {
     #     'name': 'Linear',
     #     'website': 'https://www.linear.app',
@@ -91,7 +91,12 @@ TEST_COMPANIES = [
     #     'name': 'Lane',
     #     'website': 'https://www.lane.co.ke',
     #     'description': ''
-    # }
+    # },
+        {
+        'name': 'Flutterwave',
+        'website': 'https://flutterwave.com',
+        'description': 'Empowering businesses of all sizes with seamless payment solutions tailored for enterprises, startups, and emerging markets. '
+    },
 ]
 
 # =============================================================================
