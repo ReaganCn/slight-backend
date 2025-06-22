@@ -179,7 +179,7 @@ async with get_session() as session:
 ### **🆕 Services Layer (NEW)**
 
 #### `src/services/url_discovery.py` - **Intelligent URL Discovery Service**
-**Purpose:** LangChain-powered automatic discovery of competitor URLs with reliable search APIs
+**Purpose:** LangChain-powered automatic discovery of competitor URLs with Cohere-first AI strategy
 **Entry Point:** Used by URL discovery handler
 
 **Key Features:**
@@ -188,24 +188,28 @@ async with get_session() as session:
 - **Sitemap Analysis**: Automated sitemap parsing and categorization
 - **Confidence Scoring**: ML-based relevance assessment for discovered URLs
 - **Category Detection**: Automatic categorization (pricing, features, blog, social)
-- **AI Enhancement**: GPT-4 powered URL validation and metadata extraction
+- **Cohere-First AI**: Fast, reliable AI categorization with OpenAI fallback
+- **Smart Error Handling**: Intelligent quota detection and immediate fallback switching
 
 **Core Class:**
 ```python
 class URLDiscoveryService:
-    def __init__(self, openai_api_key: str, 
+    def __init__(self, cohere_api_key: str = None,
+                 openai_api_key: str = None, 
                  google_cse_api_key: str = None,
                  google_cse_id: str = None,
                  brave_api_key: str = None):
-        self.llm = ChatOpenAI(model="gpt-4", api_key=openai_api_key)
+        # Cohere-first AI strategy with OpenAI fallback
+        self.cohere_llm = ChatCohere(model="command-r-08-2024", cohere_api_key=cohere_api_key)
+        self.openai_llm = ChatOpenAI(model="gpt-4", api_key=openai_api_key, max_retries=1)
         self._init_search_tools()  # Initialize Google CSE and Brave Search
         
     async def discover_competitor_urls(self, competitor_name: str, base_url: str) -> List[DiscoveredURL]:
-        """Main discovery pipeline with reliable search backends"""
+        """Main discovery pipeline with Cohere-first AI categorization"""
         urls = []
         urls.extend(await self._search_based_discovery(competitor_name))
         urls.extend(await self._sitemap_analysis(base_url))
-        urls = await self._ai_enhance_urls(urls, competitor_name)
+        urls = await self._ai_categorize_url_with_fallback(urls, competitor_name)
         return self._deduplicate_and_score(urls)
 ```
 
@@ -213,9 +217,10 @@ class URLDiscoveryService:
 - **Google Custom Search**: Premium quality search results with high reliability
 - **Brave Search API**: Independent search index with privacy focus
 - **Sitemap analysis**: Parses XML sitemaps for comprehensive URL discovery
-- **AI enhancement**: GPT-4 categorization and confidence scoring
+- **Cohere-first AI**: Fast, cost-effective categorization and confidence scoring
+- **OpenAI fallback**: Premium quality analysis when Cohere unavailable
 - **Social media detection**: Automatic social profile discovery
-- **Fallback mechanisms**: Intelligent failover between search backends
+- **Smart error handling**: Quota detection and immediate fallback switching
 
 #### `src/services/social_media.py` - **Social Media Integration Service**
 **Purpose:** Unified social media data fetching across multiple platforms
@@ -554,6 +559,24 @@ ENVIRONMENT="dev"                       # Deployment environment
 - Handler integration testing
 - End-to-end workflow validation
 
+#### `scripts/test_url_discovery_simple.py` - **🆕 NEW: Modular URL Discovery Testing**
+**Purpose:** Modular testing framework with selectable test configurations
+**Entry Point:** `python scripts/test_url_discovery_simple.py`
+
+**Test Modules:**
+- **Configuration Status**: API keys and service availability
+- **Cohere-Primary Discovery**: Full URL discovery with Cohere-first AI
+- **AI Categorization Only**: Test just AI categorization performance
+- **Search Backends Only**: Test just search API functionality
+- **Performance Comparison**: Compare different AI configurations
+
+**Key Features:**
+- Easy test selection via `TESTS_TO_RUN` configuration
+- Cohere-first AI strategy validation
+- Performance metrics and timing analysis
+- Batch processing with progress tracking
+- Comprehensive error handling and fallback testing
+
 ---
 
 ## 🎯 Enhanced Feature Entry Points Summary
@@ -629,9 +652,13 @@ Event       Filter         Best Scraper      Parsing Logic     Source URLs
 ## 🔌 Enhanced Integration Points
 
 ### **External APIs**
+- **Cohere Command-R**: `https://api.cohere.ai/v1/`
+  - Used in: `src/services/url_discovery.py`, `src/handlers/battle_card.py`
+  - Purpose: Primary AI for URL categorization and competitive analysis
+
 - **OpenAI GPT-4**: `https://api.openai.com/v1/`
   - Used in: `src/services/url_discovery.py`, `src/handlers/battle_card.py`
-  - Purpose: AI-powered URL discovery and competitive analysis
+  - Purpose: Fallback AI when Cohere unavailable, premium quality analysis
 
 - **Google Custom Search API**: `https://www.googleapis.com/customsearch/v1`
   - Used in: `src/services/url_discovery.py`
@@ -690,10 +717,36 @@ Event       Filter         Best Scraper      Parsing Logic     Source URLs
 - **Enhanced Database**: Verify new table integrity and relationships
 
 ### **New Performance Metrics**
-- **URL Discovery Time**: Time to discover and categorize URLs
+- **URL Discovery Time**: Time to discover and categorize URLs with Cohere-first AI
+- **AI Fallback Performance**: Response time and success rate of Cohere → OpenAI fallback
 - **Social Media Fetch Speed**: Multi-platform data retrieval performance
 - **Enhanced Scraping Efficiency**: Category-specific scraping performance
 
 ---
 
-This enhanced documentation provides a complete technical overview of the system with all new URL discovery and social media features integrated. The architecture now supports intelligent competitor analysis with automated URL discovery, comprehensive social media tracking, and enhanced AI-powered insights. 
+This enhanced documentation provides a complete technical overview of the system with all new URL discovery and social media features integrated. The architecture now supports intelligent competitor analysis with automated URL discovery, comprehensive social media tracking, and Cohere-first AI-powered insights with robust fallback mechanisms.
+
+## 🔬 Testing Strategy
+
+### **Cohere-First AI Testing**
+The system now prioritizes Cohere for AI operations with comprehensive fallback testing:
+
+- **Primary Testing**: `test_url_discovery_simple.py` with modular test selection
+- **Fallback Validation**: Automatic testing of Cohere → OpenAI → Pattern Matching chain
+- **Performance Metrics**: Response time comparison between AI providers
+- **Error Handling**: Quota detection and immediate fallback switching
+- **Cost Optimization**: Cohere free tier utilization with premium fallback
+
+### **Test Configuration Examples**
+```python
+# Quick development testing (Cohere-first)
+TESTS_TO_RUN = ["test_configuration_status", "test_cohere_primary_discovery"]
+
+# AI performance comparison
+TESTS_TO_RUN = ["test_configuration_status", "test_performance_comparison"]
+
+# Search backend validation
+TESTS_TO_RUN = ["test_configuration_status", "test_search_backends_only"]
+```
+
+The enhanced testing framework ensures reliable operation across different AI providers while optimizing for cost and performance. 

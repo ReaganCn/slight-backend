@@ -57,9 +57,20 @@ async def discover_urls(competitor_id: str) -> Dict[str, Any]:
             )
             await session.commit()
             
-            # Initialize URL discovery service
+            # Initialize URL discovery service with AI fallback support
             openai_api_key = os.getenv('OPENAI_API_KEY')
-            discovery_service = URLDiscoveryService(openai_api_key=openai_api_key)
+            google_cse_api_key = os.getenv('GOOGLE_CSE_API_KEY')
+            google_cse_id = os.getenv('GOOGLE_CSE_ID')
+            brave_api_key = os.getenv('BRAVE_API_KEY')
+            cohere_api_key = os.getenv('COHERE_API_KEY')
+            
+            discovery_service = URLDiscoveryService(
+                openai_api_key=openai_api_key,
+                google_cse_api_key=google_cse_api_key,
+                google_cse_id=google_cse_id,
+                brave_api_key=brave_api_key,
+                cohere_api_key=cohere_api_key
+            )
             
             # Discover URLs
             discovered_urls = await discovery_service.discover_competitor_urls(
@@ -71,45 +82,46 @@ async def discover_urls(competitor_id: str) -> Dict[str, Any]:
             saved_urls = {}
             total_saved = 0
             
-            for url_type, urls in discovered_urls.items():
-                saved_urls[url_type] = []
-                
-                for url_data in urls:
-                    try:
-                        # Create CompetitorUrl record
-                        competitor_url = CompetitorUrl(
-                            competitor_id=competitor.id,
-                            url_type=url_type,
-                            url=url_data['url'],
-                            title=url_data.get('title', ''),
-                            confidence_score=url_data.get('confidence_score', 0.5),
-                            discovery_method=url_data.get('discovery_method', 'unknown'),
-                            discovered_by=url_data.get('discovered_by', 'langchain_search'),
-                            status='pending',
-                            metadata_=url_data
-                        )
-                        
-                        session.add(competitor_url)
-                        await session.flush()  # Get the ID
-                        
-                        saved_urls[url_type].append({
-                            'id': str(competitor_url.id),
-                            'url': competitor_url.url,
-                            'title': competitor_url.title,
-                            'confidence_score': competitor_url.confidence_score,
-                            'discovery_method': competitor_url.discovery_method,
-                            'status': competitor_url.status
-                        })
-                        
-                        total_saved += 1
-                        
-                    except IntegrityError as e:
-                        logger.warning(f"URL already exists: {url_data['url']}")
-                        await session.rollback()
-                        continue
-                    except Exception as e:
-                        logger.error(f"Failed to save URL {url_data['url']}: {e}")
-                        continue
+            # Group URLs by category
+            for url_data in discovered_urls:
+                category = url_data.get('category', 'general')
+                if category not in saved_urls:
+                    saved_urls[category] = []
+                try:
+                    # Create CompetitorUrl record
+                    competitor_url = CompetitorUrl(
+                        competitor_id=competitor.id,
+                        url_type=category,
+                        url=url_data['url'],
+                        title=url_data.get('title', ''),
+                        confidence_score=url_data.get('confidence_score', 0.5),
+                        discovery_method=url_data.get('discovery_method', 'unknown'),
+                        discovered_by=url_data.get('source', 'langchain_search'),
+                        status='pending',
+                        metadata_=url_data
+                    )
+                    
+                    session.add(competitor_url)
+                    await session.flush()  # Get the ID
+                    
+                    saved_urls[category].append({
+                        'id': str(competitor_url.id),
+                        'url': competitor_url.url,
+                        'title': competitor_url.title,
+                        'confidence_score': competitor_url.confidence_score,
+                        'discovery_method': competitor_url.discovery_method,
+                        'status': competitor_url.status
+                    })
+                    
+                    total_saved += 1
+                    
+                except IntegrityError as e:
+                    logger.warning(f"URL already exists: {url_data['url']}")
+                    await session.rollback()
+                    continue
+                except Exception as e:
+                    logger.error(f"Failed to save URL {url_data['url']}: {e}")
+                    continue
             
             # Update competitor status
             await session.execute(

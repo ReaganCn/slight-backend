@@ -39,6 +39,14 @@ The system intelligently discovers competitor pages using LangChain with reliabl
 - **Blog pages**: Locate content marketing and thought leadership
 - **Social media**: Find LinkedIn, Twitter, Instagram, and TikTok profiles
 
+### **Robust AI Fallback System**
+Enhanced error handling ensures continuous operation even with API failures:
+- **Cohere Primary**: Fast, reliable, and cost-effective AI categorization
+- **OpenAI Fallback**: Premium quality GPT-4 when Cohere unavailable
+- **Pattern Matching**: Final fallback ensures system never fails
+- **Smart Error Detection**: Detects quota limits, rate limits, and API failures
+- **Optimized Performance**: Faster failure detection and immediate fallback switching
+
 ### **Smart Confirmation Workflow**
 - URLs discovered with confidence scores
 - User review and confirmation interface
@@ -148,7 +156,8 @@ PREFERRED_SCRAPER="scrapingbee"    # Paid option
 PREFERRED_SCRAPER="auto"           # Smart detection
 
 # API Keys
-OPENAI_API_KEY="sk-your-key"
+COHERE_API_KEY="your-cohere-key"   # Primary AI for URL categorization
+OPENAI_API_KEY="sk-your-key"       # Fallback AI when Cohere unavailable
 SCRAPINGBEE_API_KEY="your-key"     # Optional
 
 # 🆕 NEW: Reliable Search APIs for URL Discovery
@@ -215,13 +224,14 @@ async with EnhancedCompetitorScraper() as scraper:
     result = await scraper.scrape_by_category(competitor_id, "pricing")
 ```
 
-### **🆕 Reliable URL Discovery**
+### **🆕 Reliable URL Discovery with Cohere-First AI**
 ```python
 from services.url_discovery import URLDiscoveryService
 
-# Initialize with reliable search APIs
+# Initialize with Cohere-first AI strategy
 discovery_service = URLDiscoveryService(
-    openai_api_key="sk-...",
+    cohere_api_key="your-cohere-key",      # Primary AI
+    openai_api_key="sk-...",               # Fallback AI
     google_cse_api_key="your-google-key",
     google_cse_id="your-cse-id",
     brave_api_key="your-brave-key"
@@ -258,18 +268,43 @@ async with CompetitorScraper("scrapingbee") as scraper:
 ## 🧪 Testing
 
 ```bash
+# 🆕 Modular URL discovery testing with Cohere-first
+python scripts/test_url_discovery_simple.py
+
 # Test all scraping options
 python scripts/test_scraping.py
 
 # Test specific scraper
 PREFERRED_SCRAPER=playwright python scripts/test_scraping.py
 
-# 🆕 Test URL discovery workflow
+# Test comprehensive URL discovery workflow
 python scripts/test_url_discovery.py
 
 # Compare performance
 python scripts/test_local.py
 ```
+
+### **🔧 Modular Test Configuration**
+The new `test_url_discovery_simple.py` script offers selectable test modules:
+
+```python
+# ✅ QUICK TEST (Default - Recommended for development)
+TESTS_TO_RUN = [
+    "test_configuration_status",      # Check API keys & service status
+    "test_cohere_primary_discovery",  # Full discovery with Cohere-first
+]
+
+# 🧠 AI-ONLY TESTS (Uncomment to test just AI categorization)
+# TESTS_TO_RUN = ["test_configuration_status", "test_ai_categorization_only"]
+
+# 🔍 SEARCH-ONLY TESTS (Uncomment to test just search backends)  
+# TESTS_TO_RUN = ["test_configuration_status", "test_search_backends_only"]
+
+# ⚡ PERFORMANCE COMPARISON (Uncomment to compare AI configurations)
+# TESTS_TO_RUN = ["test_configuration_status", "test_performance_comparison"]
+```
+
+**Usage**: Simply comment/uncomment the `TESTS_TO_RUN` configuration you want to use.
 
 ## 📁 Project Structure
 
@@ -296,16 +331,16 @@ python scripts/test_local.py
 
 ## 💰 Cost Analysis
 
-### Free Tier (Playwright + Basic)
+### Free Tier (Playwright + Cohere)
 - **Scraping**: $0
-- **URL Discovery**: ~$2-5/month (OpenAI API)
+- **URL Discovery**: ~$0-2/month (Cohere free tier)
 - **Lambda**: ~$1-5/month (depends on usage)
 - **RDS**: ~$13/month (db.t3.micro)
-- **Total**: ~$16-23/month
+- **Total**: ~$14-20/month
 
 ### Premium Tier (ScrapingBee + Social APIs)
 - **Scraping**: $29-199/month
-- **URL Discovery**: ~$2-5/month (OpenAI API)
+- **URL Discovery**: ~$2-5/month (Cohere + OpenAI fallback)
 - **Social Media APIs**: $0-50/month (varies by platform)
 - **Lambda**: ~$1-3/month (lower memory usage)
 - **RDS**: ~$13/month

@@ -40,14 +40,14 @@ class CompetitorScraper:
         self.scraper_type = scraper_type
         self.config = config or {}
         self.scraper = None
-        
+    
     async def __aenter__(self):
         """Async context manager entry"""
         if self.scraper_type == "auto":
             self.scraper = get_scraper_from_env(self.config)
         else:
             self.scraper = ScraperFactory.create_from_string(self.scraper_type, self.config)
-        
+            
         # Initialize scraper if it has async setup
         if hasattr(self.scraper, '__aenter__'):
             await self.scraper.__aenter__()

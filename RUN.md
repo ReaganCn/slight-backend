@@ -61,7 +61,8 @@ Edit `.env` with your actual values:
 DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/competitordb"
 
 # Core API Keys
-OPENAI_API_KEY="sk-your-actual-openai-key"
+COHERE_API_KEY="your-cohere-api-key"         # Primary AI for URL categorization
+OPENAI_API_KEY="sk-your-actual-openai-key"   # Fallback AI (GPT-4 access)
 
 # Scraping Configuration (Flexible Architecture)
 PREFERRED_SCRAPER="playwright"          # Options: 'playwright' (free), 'scrapingbee' (paid), 'auto'
@@ -93,7 +94,7 @@ ENVIRONMENT="dev"
 - **Google Custom Search**: Premium quality search (100 free queries/day)
 - **Brave Search API**: Independent search index (2,000 free queries/month)
 - **Sitemap Analysis**: Automated sitemap parsing and URL extraction
-- **AI Enhancement**: GPT-4 powered categorization and confidence scoring
+- **AI Enhancement**: Cohere-first AI categorization with OpenAI fallback
 
 **🆕 NEW: Social Media Integration:**
 - **Twitter/X**: Official API v2 (requires Bearer Token)
@@ -190,6 +191,9 @@ python ../scripts/test_local.py
 # Test the complete URL discovery and social media workflow
 python ../scripts/test_url_discovery.py
 
+# 🆕 NEW: Test modular URL discovery with Cohere-first
+python ../scripts/test_url_discovery_simple.py
+
 # Expected output:
 # 🔍 Testing URL Discovery Service:
 # ✅ LangChain integration ready
@@ -235,7 +239,7 @@ result = handler(event, {})
 print('Enhanced competitor management:', result)
 "
 
-# Test URL discovery service
+# Test URL discovery service with Cohere-first
 python -c "
 import asyncio
 import sys
@@ -244,8 +248,9 @@ from services.url_discovery import URLDiscoveryService
 import os
 
 async def test_discovery():
-    if os.getenv('OPENAI_API_KEY'):
+    if os.getenv('COHERE_API_KEY'):
         service = URLDiscoveryService(
+            cohere_api_key=os.getenv('COHERE_API_KEY'),
             openai_api_key=os.getenv('OPENAI_API_KEY'),
             serpapi_key=os.getenv('SERPAPI_KEY')
         )
@@ -254,7 +259,7 @@ async def test_discovery():
         for url in urls[:3]:  # Show first 3
             print(f'  - {url.category}: {url.url} (confidence: {url.confidence_score:.2f})')
     else:
-        print('❌ OpenAI API key required for URL discovery')
+        print('❌ Cohere API key required for URL discovery')
 
 asyncio.run(test_discovery())
 "
@@ -619,25 +624,25 @@ print('💰 Enhanced Cost Analysis (per month):')
 print()
 print('🆓 FREE TIER (Basic Features):')
 print('   • Scraping: Playwright ($0)')
-print('   • URL Discovery: DuckDuckGo + GPT-4 (~$2-5)')
+print('   • URL Discovery: Cohere free tier (~$0-2)')
 print('   • Social Media: Free tier APIs (~$0)')
 print('   • Lambda: ~$1-3 (varies by usage)')
 print('   • RDS: ~$13 (db.t3.micro)')
-print('   • Total: ~$16-21')
+print('   • Total: ~$14-18')
 print()
 print('💎 PREMIUM TIER (All Features):')
 print('   • Scraping: ScrapingBee ($29-199)')
-print('   • URL Discovery: SerpAPI + GPT-4 (~$10-20)')
+print('   • URL Discovery: Cohere + OpenAI fallback (~$5-15)')
 print('   • Social Media: Paid APIs (~$0-50)')
 print('   • Lambda: ~$2-5 (higher usage)')
 print('   • RDS: ~$13-25 (depends on usage)')
-print('   • Total: ~$54-299')
+print('   • Total: ~$49-294')
 print()
 print('🎯 HYBRID APPROACH (Recommended):')
 print('   • Scraping: Playwright (free) with ScrapingBee fallback')
-print('   • URL Discovery: Basic (free) with SerpAPI for complex cases')
+print('   • URL Discovery: Cohere-first with OpenAI fallback')
 print('   • Social Media: Mix of free and paid APIs')
-print('   • Total: ~$25-75 (optimal cost/performance)')
+print('   • Total: ~$20-70 (optimal cost/performance)')
 print()
 print('📊 Break-even Analysis:')
 print('   • Premium worth it if: >100 competitors tracked')
@@ -743,7 +748,8 @@ import sys
 sys.path.insert(0, 'src')
 
 print('🔍 URL Discovery Debug:')
-print(f'OpenAI API Key: {\"✅\" if os.getenv(\"OPENAI_API_KEY\") else \"❌\"}')
+print(f'Cohere API Key: {\"✅\" if os.getenv(\"COHERE_API_KEY\") else \"❌\"}')
+print(f'OpenAI API Key: {\"✅\" if os.getenv(\"OPENAI_API_KEY\") else \"⚠️ Fallback\"}')
 print(f'SerpAPI Key: {\"✅\" if os.getenv(\"SERPAPI_KEY\") else \"⚠️ Optional\"}')
 
 try:
